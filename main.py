@@ -1,9 +1,8 @@
 import time
 import win32gui, win32process
 import psutil
-import ctypes, win32con
 from pathlib import Path
-
+import listApps002
 
 grupy = {}
 
@@ -19,6 +18,8 @@ def get_active_process():
     return name, title
 
 def monitor(poll_interval=1.0, min_session=1.0):
+    listApps002.main()
+    grupy = listApps002.grupy
     current = None
     start = time.monotonic()
     totals = {}
@@ -36,7 +37,6 @@ def monitor(poll_interval=1.0, min_session=1.0):
             time.sleep(poll_interval)
     except KeyboardInterrupt:
         print("Zakończono. Suma:", totals)
-        print(grupy)
 
 if __name__ == "__main__":
     monitor()

@@ -3,6 +3,7 @@
 
 import os
 import winreg
+import json  # <-- NOWE
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -13,10 +14,36 @@ try:
 except Exception:
     win32com = None
 
+GRUPY_FILE = "grupy.json"   # <-- NOWE
 grupy = {}  # słownik: nazwa.exe -> 0/1
 
 
-# ---------------- BACKEND (bez zmian poza kosmetyką) ----------------
+# ---------------- ZAPIS / ODCZYT GRUP ----------------
+
+def load_groups():
+    """Wczytuje słownik grup z pliku JSON, jeśli istnieje."""
+    global grupy
+    if not os.path.exists(GRUPY_FILE):
+        return
+
+    try:
+        with open(GRUPY_FILE, "r", encoding="utf-8") as f:
+            grupy = json.load(f)
+    except Exception:
+        messagebox.showwarning("Błąd", "Nie udało się wczytać grup z pliku.")
+        grupy = {}
+
+
+def save_groups():
+    """Zapisuje słownik grup do pliku JSON."""
+    try:
+        with open(GRUPY_FILE, "w", encoding="utf-8") as f:
+            json.dump(grupy, f, indent=4, ensure_ascii=False)
+    except Exception:
+        messagebox.showerror("Błąd", "Nie udało się zapisać pliku grup.")
+
+
+# ---------------- BACKEND ----------------
 
 def read_uninstall_names(root, subpath, wow64_flag=0):
     names = []
@@ -95,6 +122,8 @@ class AppGUI:
         self.root = root
         self.root.title("Przypisywanie aplikacji do grup")
 
+        load_groups()  # <-- NOWE: wczytaj grupy przy starcie
+
         # lista aplikacji
         self.apps = get_sorted_exe_list()
 
@@ -129,6 +158,8 @@ class AppGUI:
         key = self.apps[idx]
 
         grupy[key] = 0 if group == "A" else 1
+
+        save_groups()  # <-- NOWE: automatyczny zapis po każdej zmianie
         self.refresh_output()
 
     def refresh_output(self):
