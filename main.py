@@ -1,7 +1,7 @@
-# main.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 import threading
 import time
 import tkinter as tk
@@ -10,14 +10,22 @@ from tkinter import ttk, messagebox, filedialog
 import win32gui
 import win32process
 import psutil
-
+import json
 import listApps002 as listapps  # backend
+
+TIMES_FILE = "times.json"
 
 
 class MonitorThread(threading.Thread):
-    """Wątek monitorujący aktywny proces i zliczający czas spędzony przy aplikacjach."""
-
     def __init__(self, stop_event, poll_interval=1.0, min_session=1.0):
+        """
+        Inicjalizacja wątku monitorującego.
+        - stop_event: threading.Event do zatrzymania pętli.
+        - poll_interval: jak często (s) sprawdzać aktywne okno.
+        - min_session: minimalna długość sesji (s), aby ją zaliczyć.
+        Ustawia strukturę totals, aktualny proces, czas startu oraz wczytuje
+        zapisany czas dla grupy A.
+        """
         super().__init__(daemon=True)
         self.stop_event = stop_event
         self.poll_interval = poll_interval
@@ -25,6 +33,9 @@ class MonitorThread(threading.Thread):
         self.totals = {}  # nazwa_procesu -> sekundy
         self.current = None
         self.start_time = time.monotonic()
+        # wczytaj zapisany czas grupy A (jeśli istnieje)
+        self.group_a_total = float(self.load_times() or 0)
+
 
     def get_active_process(self):
         try:
@@ -35,18 +46,28 @@ class MonitorThread(threading.Thread):
         except Exception:
             return None
 
+   
     def run(self):
-        self.current = None
-        self.start_time = time.monotonic()
+        """Co poll_interval sprawdza aktywny proces, dolicza czas poprzedniej sesji
+         jeśli przekroczyła min_session i aktualizuje totals oraz group_a_total."""
         while not self.stop_event.is_set():
             name = self.get_active_process()
             now = time.monotonic()
+
             if name != self.current:
                 elapsed = now - self.start_time
+
                 if self.current and elapsed >= self.min_session:
                     self.totals[self.current] = self.totals.get(self.current, 0) + elapsed
+                    try:
+                        if listapps.grupy.get(self.current) == 0:
+                            self.group_a_total += elapsed
+                    except Exception:
+                        pass
+
                 self.current = name
                 self.start_time = now
+
             time.sleep(self.poll_interval)
 
         # przy zatrzymaniu wątku dolicz ostatnią sesję (jeśli wystarczająco długa)
@@ -54,18 +75,59 @@ class MonitorThread(threading.Thread):
         elapsed = now - self.start_time
         if self.current and elapsed >= self.min_session:
             self.totals[self.current] = self.totals.get(self.current, 0) + elapsed
+            try:
+                if listapps.grupy.get(self.current) == 0:
+                    self.group_a_total += elapsed
+            except Exception:
+                pass
+
+
+    def save_times(self):
+        """Zapisuje czas grupy A do pliku JSON."""
+        try:
+            data = {"group_a_seconds": int(self.group_a_total)}
+            with open(TIMES_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+        except Exception:
+            pass
+
+
+    def load_times(self):
+        """Wczytuje zapisany czas grupy A (jeśli istnieje). Zwraca liczbę sekund lub 0."""
+        if not os.path.exists(TIMES_FILE):
+            return 0
+        try:
+            with open(TIMES_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return int(data.get("group_a_seconds", 0))
+        except Exception:
+            return 0
 
 
 class AppGUI:
+    # Tworzy okno, listę aplikacji, przyciski do przypisywania grup,
+    # uruchamia wątek monitorujący i obsługuje zamknięcie aplikacji.
     def __init__(self, root):
+        """
+        Inicjalizacja GUI.
+        - root: instancja tk.Tk()
+        Ustawia czcionki, style, listę aplikacji, elementy interfejsu,
+        uruchamia MonitorThread i harmonogram odświeżania.
+        """
         self.root = root
         self.root.title("Przypisywanie aplikacji do grup + monitor")
+
+        # czcionka domyślna
+        self.default_font = tkfont.Font(family="Segoe UI", size=12)
+        self.root.option_add("*Font", self.default_font)
+        style = ttk.Style(self.root)
+        style.configure(".", font=("Segoe UI", 12))
 
         # lista aplikacji z backendu
         self.apps = listapps.get_sorted_exe_list()
 
         # Listbox
-        self.listbox = tk.Listbox(root, height=20, width=40, font=tkfont.Font(family="Segoe UI", size=12))
+        self.listbox = tk.Listbox(root, height=20, width=40, font=self.default_font)
         self.listbox.grid(row=1, column=0, rowspan=6, padx=10, pady=10)
         for app in self.apps:
             self.listbox.insert(tk.END, app)
@@ -81,13 +143,13 @@ class AppGUI:
         ttk.Button(root, text="Dodaj folder do skanowania", command=self.add_scan_folder_dialog).grid(row=0, column=0, padx=10, pady=5)
 
         # pole tekstowe z wynikami grup
-        self.output = tk.Text(root, width=50, height=12)
+        self.output = tk.Text(root, width=50, height=12, font=self.default_font)
         self.output.grid(row=4, column=1, rowspan=3, padx=10, pady=10)
 
         # pole z podsumowaniem czasu (aktualizowane okresowo)
-        ttk.Label(root, text="Czas (sekundy) spędzony przy procesach:").grid(row=7, column=0, columnspan=2, pady=(5,0))
-        self.totals_box = tk.Text(root, width=80, height=10)
-        self.totals_box.grid(row=8, column=0, columnspan=2, padx=10, pady=(0,10))
+        ttk.Label(root, text="Czas (sekundy) spędzony przy procesach:").grid(row=7, column=0, columnspan=2, pady=(5, 0))
+        self.totals_box = tk.Text(root, width=80, height=10, font=self.default_font)
+        self.totals_box.grid(row=8, column=0, columnspan=2, padx=10, pady=(0, 10))
 
         # monitor w tle
         self.stop_event = threading.Event()
@@ -96,10 +158,12 @@ class AppGUI:
 
         # odświeżanie GUI
         self.refresh_output()
+        # pierwsze natychmiastowe uaktualnienie, potem co 60s (60000 ms)
         self.update_totals_periodically()
 
         # przechwycenie zamknięcia okna
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
 
     def add_scan_folder_dialog(self):
         """Otwiera dialog wyboru folderu, dodaje ścieżkę do backendu i odświeża listę aplikacji."""
@@ -118,7 +182,9 @@ class AppGUI:
         self.refresh_output()
         messagebox.showinfo("Sukces", f"Dodano folder do skanowania:\n{folder}")
 
+
     def add_to_group(self, group_letter):
+        """Pobiera zaznaczenie i wywołuje backendową funkcję dodającą do grupy."""
         selection = self.listbox.curselection()
         if not selection:
             messagebox.showwarning("Brak wyboru", "Najpierw wybierz aplikację z listy.")
@@ -128,8 +194,10 @@ class AppGUI:
         group = 0 if group_letter == "A" else 1
         listapps.add_to_group(key, group)
         self.refresh_output()
+        
 
     def remove_from_group(self):
+        """Pobiera zaznaczenie i wywołuje backendową funkcję usuwającą nazwe z grupy."""
         selection = self.listbox.curselection()
         if not selection:
             messagebox.showwarning("Brak wyboru", "Najpierw wybierz aplikację z listy.")
@@ -139,44 +207,65 @@ class AppGUI:
         listapps.remove_from_group(key)
         self.refresh_output()
 
+
     def refresh_output(self):
         """Odświeża wyświetlanie słownika grup."""
         self.output.delete("1.0", tk.END)
         for k, v in listapps.grupy.items():
             self.output.insert(tk.END, f"{k} -> {v}\n")
 
+
     def update_totals_periodically(self):
-        """Aktualizuje widok z totals co sekundę (nie blokuje GUI)."""
-        totals = dict(self.monitor.totals)
+        """
+        Aktualizuje widok z totals i oblicza czas spędzony w grupie A.
+        Odświeżanie ustawione na 60 sekund (60000 ms) dla optymalizacji.
+        """
+        # snapshot totals z wątku monitorującego
+        totals = dict(self.monitor.totals) 
+        # jeśli aktualnie trwa sesja, pokaż jej czas także (ale nie modyfikujemy totals w wątku)
         if self.monitor.current:
             elapsed = time.monotonic() - self.monitor.start_time
             totals[self.monitor.current] = totals.get(self.monitor.current, 0) + elapsed
 
+        # wyświetl totals
         self.totals_box.delete("1.0", tk.END)
         for proc, secs in sorted(totals.items(), key=lambda x: -x[1]):
             group = listapps.grupy.get(proc, "—")
             self.totals_box.insert(tk.END, f"{proc} -> {int(secs)} s (grupa: {group})\n")
 
-        self.root.after(1000, self.update_totals_periodically)
+        # zaplanuj kolejne odświeżenie za 60 sekund
+        self.root.after(60000, self.update_totals_periodically)
+
 
     def on_close(self):
-        """Zamyka aplikację: zatrzymuje monitor, wypisuje totals i grupy, kończy program."""
+        """Zamyka aplikację: zatrzymuje monitor, zapisuje czas grupy A i kończy program."""
         if messagebox.askyesno("Zamknij", "Czy na pewno chcesz zamknąć aplikację?"):
+            # zatrzymaj wątek monitorujący
             self.stop_event.set()
             self.monitor.join(timeout=2.0)
 
-            print("Suma czasu (sekundy) per proces:")
-            for proc, secs in sorted(self.monitor.totals.items(), key=lambda x: -x[1]):
-                print(f"{proc} -> {int(secs)} s")
+            # przed zapisem dolicz bieżącą sesję jeśli trwa i należy do grupy A
+            try:
+                if self.monitor.current and listapps.grupy.get(self.monitor.current) == 0:
+                    elapsed = time.monotonic() - self.monitor.start_time
+                    if elapsed >= self.monitor.min_session:
+                        self.monitor.group_a_total += elapsed
+                        # również zaktualizuj totals dla kompletności
+                        self.monitor.totals[self.monitor.current] = self.monitor.totals.get(self.monitor.current, 0) + elapsed
+            except Exception:
+                pass
 
-            print("\nZawartość słownika grup:")
-            for k, v in listapps.grupy.items():
-                print(f"{k} -> {v}")
+            # zapisz skumulowany czas grupy A
+            self.monitor.save_times()
+
+            # opcjonalnie wypisz do konsoli (przydatne do debugu)
+            print("Zapisano czas grupy A (produktywne):", int(self.monitor.group_a_total), "s")
 
             self.root.destroy()
 
 
 def main():
+    # Etykieta: Punkt wejścia aplikacji GUI.
     root = tk.Tk()
     AppGUI(root)
     root.mainloop()
