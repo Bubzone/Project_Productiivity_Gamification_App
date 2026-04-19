@@ -1,12 +1,10 @@
+# listApps002.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 import os
-import winreg
-import json  # <-- NOWE
+import json
 from pathlib import Path
-import tkinter as tk
-from tkinter import ttk, messagebox
 
 # opcjonalnie: do rozwiązywania .lnk (wymaga pywin32)
 try:
@@ -14,23 +12,24 @@ try:
 except Exception:
     win32com = None
 
-GRUPY_FILE = "grupy.json"   # <-- NOWE
-grupy = {}  # słownik: nazwa.exe -> 0/1
+GRUPY_FILE = "grupy.json"
+SCAN_PATHS_FILE = "scan_paths.json"
+grupy = {}           # słownik: nazwa.exe -> 0/1
+_scan_paths = []     # lista dodatkowych ścieżek do skanowania (string)
 
 
-# ---------------- ZAPIS / ODCZYT GRUP ----------------
+# ---------------- ZAPIS / ODCZYT GRUP I SCAN PATHS ----------------
 
 def load_groups():
     """Wczytuje słownik grup z pliku JSON, jeśli istnieje."""
     global grupy
     if not os.path.exists(GRUPY_FILE):
+        grupy = {}
         return
-
     try:
         with open(GRUPY_FILE, "r", encoding="utf-8") as f:
             grupy = json.load(f)
     except Exception:
-        messagebox.showwarning("Błąd", "Nie udało się wczytać grup z pliku.")
         grupy = {}
 
 
@@ -40,45 +39,57 @@ def save_groups():
         with open(GRUPY_FILE, "w", encoding="utf-8") as f:
             json.dump(grupy, f, indent=4, ensure_ascii=False)
     except Exception:
-        messagebox.showerror("Błąd", "Nie udało się zapisać pliku grup.")
+        pass
 
 
-# ---------------- BACKEND ----------------
-
-def read_uninstall_names(root, subpath, wow64_flag=0):
-    names = []
-    access = winreg.KEY_READ
-    if wow64_flag:
-        access |= wow64_flag
+def load_scan_paths():
+    """Wczytuje listę dodatkowych ścieżek do skanowania."""
+    global _scan_paths
+    if not os.path.exists(SCAN_PATHS_FILE):
+        _scan_paths = []
+        return
     try:
-        key = winreg.OpenKey(root, subpath, 0, access)
-    except FileNotFoundError:
-        return names
+        with open(SCAN_PATHS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, list):
+                _scan_paths = [str(p) for p in data if p and Path(p).exists()]
+            else:
+                _scan_paths = []
+    except Exception:
+        _scan_paths = []
 
-    i = 0
-    while True:
-        try:
-            subname = winreg.EnumKey(key, i)
-        except OSError:
-            break
-        i += 1
-        try:
-            subkey = winreg.OpenKey(key, subname, 0, access)
-            try:
-                display_name, _ = winreg.QueryValueEx(subkey, "DisplayName")
-                if display_name:
-                    names.append(str(display_name).strip())
-            except OSError:
-                pass
-            winreg.CloseKey(subkey)
-        except Exception:
-            pass
 
-    winreg.CloseKey(key)
-    return names
+def save_scan_paths():
+    """Zapisuje listę dodatkowych ścieżek do pliku JSON."""
+    try:
+        with open(SCAN_PATHS_FILE, "w", encoding="utf-8") as f:
+            json.dump(_scan_paths, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
 
+
+def add_scan_path(path_str: str):
+    """
+    Dodaje nową ścieżkę do listy skanowanych folderów.
+    Zwraca True jeśli dodano, False jeśli nie (np. nieistniejąca ścieżka lub już dodana).
+    """
+    p = Path(path_str).expanduser()
+    if not p.exists() or not p.is_dir():
+        return False
+    sp = str(p.resolve())
+    if sp in _scan_paths:
+        return False
+    _scan_paths.append(sp)
+    save_scan_paths()
+    return True
+
+
+# ---------------- SKANOWANIE APLIKACJI ----------------
 
 def resolve_lnk_target(lnk_path):
+    """
+    Jeśli pywin32 jest dostępne, zwraca TargetPath skrótu .lnk; w przeciwnym razie None.
+    """
     if win32com is None:
         return None
     try:
@@ -89,91 +100,105 @@ def resolve_lnk_target(lnk_path):
         return None
 
 
-def scan_start_menu_names():
-    results = []
+def scan_start_menu_and_desktop():
+    """
+    Skanuje Start Menu (user + all) oraz pulpit użytkownika i publiczny.
+    Obsługuje pliki .lnk (rozwiązuje target) oraz dodaje nazwy skrótów.
+    Zwraca set nazw (mogą zawierać nazwy plików .exe).
+    """
+    results = set()
+
     user_start = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs")
     all_start = os.path.expandvars(r"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs")
+    user_desktop = Path.home() / "Desktop"
+    public_desktop = Path(os.path.expandvars(r"%PUBLIC%\Desktop"))
 
-    for base in (user_start, all_start):
+    bases = [user_start, all_start, str(user_desktop), str(public_desktop)]
+
+    for base in bases:
         p = Path(base)
         if not p.exists():
             continue
+
+        # dodaj bezpośrednie pliki .exe w katalogu (i podkatalogach)
+        for exe in p.rglob("*.exe"):
+            try:
+                results.add(exe.name)
+            except Exception:
+                continue
+
+        # .lnk: dodaj nazwę skrótu i (jeśli możliwe) basename targetu
         for lnk in p.rglob("*.lnk"):
-            display = lnk.stem.strip()
-            results.append(display)
-            target = resolve_lnk_target(lnk)
-            if target:
-                results.append(Path(target).name)
+            try:
+                display = lnk.stem.strip()
+                if display:
+                    results.add(display)
+                target = resolve_lnk_target(lnk)
+                if target:
+                    results.add(Path(target).name)
+            except Exception:
+                continue
+
+    return results
+
+
+def scan_folder_for_exes(folder_path: str):
+    """
+    Skanuje podany folder rekurencyjnie i zwraca set nazw plików .exe (basename).
+    Użyteczne do skanowania katalogów z grami.
+    """
+    results = set()
+    try:
+        p = Path(folder_path)
+        if not p.exists() or not p.is_dir():
+            return results
+        for f in p.rglob("*.exe"):
+            try:
+                results.add(f.name)
+            except Exception:
+                continue
+    except Exception:
+        pass
     return results
 
 
 def get_sorted_exe_list():
-    names = scan_start_menu_names()
+    """
+    Zwraca posortowaną listę nazw kończących się na .exe znalezionych w Start Menu,
+    na pulpicie oraz w dodatkowych ścieżkach (_scan_paths).
+    """
+    results = set()
 
-    cleaned = {str(n).strip() for n in names if n}
-    exe_only = {n for n in cleaned if n.lower().endswith(".exe")}
-    return sorted(exe_only, key=lambda x: x.lower())
+    # podstawowy skan Start Menu + Desktop
+    results.update(scan_start_menu_and_desktop())
 
+    # dodatkowe ścieżki wskazane przez użytkownika
+    for sp in list(_scan_paths):
+        results.update(scan_folder_for_exes(sp))
 
-# ---------------- GUI ----------------
-
-class AppGUI:
-    def __init__(self, root):
-        self.root = root
-        self.root.title("Przypisywanie aplikacji do grup")
-
-        load_groups()  # <-- NOWE: wczytaj grupy przy starcie
-
-        # lista aplikacji
-        self.apps = get_sorted_exe_list()
-
-        # Listbox
-        self.listbox = tk.Listbox(root, height=20, width=40)
-        self.listbox.grid(row=0, column=0, rowspan=6, padx=10, pady=10)
-
-        for app in self.apps:
-            self.listbox.insert(tk.END, app)
-
-        # przyciski grup
-        ttk.Button(root, text="Dodaj do grupy A (produktywne)",
-                   command=lambda: self.add_to_group("A")).grid(row=0, column=1, padx=10, pady=5)
-
-        ttk.Button(root, text="Dodaj do grupy B (nieproduktywne)",
-                   command=lambda: self.add_to_group("B")).grid(row=1, column=1, padx=10, pady=5)
-
-        # pole tekstowe z wynikami
-        self.output = tk.Text(root, width=40, height=15)
-        self.output.grid(row=2, column=1, rowspan=4, padx=10, pady=10)
-
-        self.refresh_output()
-
-    def add_to_group(self, group):
-        """Dodaje wybraną aplikację do grupy."""
-        selection = self.listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Brak wyboru", "Najpierw wybierz aplikację z listy.")
-            return
-
-        idx = selection[0]
-        key = self.apps[idx]
-
-        grupy[key] = 0 if group == "A" else 1
-
-        save_groups()  # <-- NOWE: automatyczny zapis po każdej zmianie
-        self.refresh_output()
-
-    def refresh_output(self):
-        """Odświeża wyświetlanie słownika grup."""
-        self.output.delete("1.0", tk.END)
-        for k, v in grupy.items():
-            self.output.insert(tk.END, f"{k} -> {v}\n")
+    # filtruj tylko nazwy kończące się na .exe
+    exe_only = {n for n in results if isinstance(n, str) and n.lower().endswith(".exe")}
+    cleaned = [str(x).strip() for x in exe_only if x and str(x).strip()]
+    return sorted(set(cleaned), key=lambda s: s.lower())
 
 
-def main():
-    root = tk.Tk()
-    AppGUI(root)
-    root.mainloop()
+# ---------------- OPERACJE NA GRUPACH (API) ----------------
+
+def add_to_group(app_name: str, group: int):
+    """Dodaj/aktualizuj aplikację w grupie (0 lub 1). Zapisuje plik."""
+    if not app_name:
+        return
+    grupy[app_name] = int(group)
+    save_groups()
 
 
-if __name__ == "__main__":
-    main()
+def remove_from_group(app_name: str):
+    """Usuń aplikację ze słownika grup (jeśli istnieje). Zapisuje plik."""
+    if app_name in grupy:
+        del grupy[app_name]
+        save_groups()
+
+
+# inicjalizacja przy imporcie
+load_groups()
+load_scan_paths()
