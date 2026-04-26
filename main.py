@@ -50,23 +50,32 @@ class MonitorThread(threading.Thread):
     def run(self):
         """Co poll_interval sprawdza aktywny proces, dolicza czas poprzedniej sesji
          jeśli przekroczyła min_session i aktualizuje totals oraz group_a_total."""
+        grupa = 2
         while not self.stop_event.is_set():
             name = self.get_active_process()
             now = time.monotonic()
 
             if name != self.current:
                 elapsed = now - self.start_time
-
-                if self.current and elapsed >= self.min_session:
+                if self.current:
                     self.totals[self.current] = self.totals.get(self.current, 0) + elapsed
-                    try:
-                        if listapps.grupy.get(self.current) == 0:
-                            self.group_a_total += elapsed
-                    except Exception:
-                        pass
-
+                    if grupa == 0:
+                        self.group_a_total += elapsed
+                    elif grupa == 1: 
+                        if self.group_a_total < elapsed:
+                            self.group_a_total = 0
+                        else:
+                            self.group_a_total -= elapsed
                 self.current = name
                 self.start_time = now
+                grupa = listapps.grupy.get(self.current)
+            
+            if grupa == 1:
+                elapsed = now - self.start_time
+                if elapsed >= self.group_a_total:
+                    messagebox.showinfo("Koniec czasu", "Twój czas na aplikacje nieproduktywne się skończył.")
+                    self.group_a_total = 0
+                
 
             time.sleep(self.poll_interval)
 
@@ -75,11 +84,13 @@ class MonitorThread(threading.Thread):
         elapsed = now - self.start_time
         if self.current and elapsed >= self.min_session:
             self.totals[self.current] = self.totals.get(self.current, 0) + elapsed
-            try:
-                if listapps.grupy.get(self.current) == 0:
-                    self.group_a_total += elapsed
-            except Exception:
-                pass
+            if grupa == 0:
+                self.group_a_total += elapsed
+            elif grupa == 1:
+                if self.group_a_total < elapsed:
+                    self.group_a_total = 0
+                else:
+                    self.group_a_total -= elapsed
 
 
     def save_times(self):
@@ -218,7 +229,7 @@ class AppGUI:
     def update_totals_periodically(self):
         """
         Aktualizuje widok z totals i oblicza czas spędzony w grupie A.
-        Odświeżanie ustawione na 60 sekund (60000 ms) dla optymalizacji.
+        Odświeżanie ustawione na x sekund dla optymalizacji.
         """
         # snapshot totals z wątku monitorującego
         totals = dict(self.monitor.totals) 
@@ -234,7 +245,7 @@ class AppGUI:
             self.totals_box.insert(tk.END, f"{proc} -> {int(secs)} s (grupa: {group})\n")
 
         # zaplanuj kolejne odświeżenie za 60 sekund
-        self.root.after(60000, self.update_totals_periodically)
+        self.root.after(10000, self.update_totals_periodically)
 
 
     def on_close(self):
