@@ -17,7 +17,7 @@ TIMES_FILE = "times.json"
 
 
 class MonitorThread(threading.Thread):
-    def __init__(self, stop_event, poll_interval=1.0, min_session=1.0):
+    def __init__(self, stop_event, poll_interval=1.0, min_session=1.0, on_limit_reached=None):
         """
         Inicjalizacja wątku monitorującego.
         - stop_event: threading.Event do zatrzymania pętli.
@@ -33,6 +33,7 @@ class MonitorThread(threading.Thread):
         self.totals = {}  # nazwa_procesu -> sekundy
         self.current = None
         self.start_time = time.monotonic()
+        self.on_limit_reached = on_limit_reached
         # wczytaj zapisany czas grupy A (jeśli istnieje)
         self.group_a_total = float(self.load_times() or 0)
 
@@ -73,7 +74,9 @@ class MonitorThread(threading.Thread):
             if grupa == 1:
                 elapsed = now - self.start_time
                 if elapsed >= self.group_a_total:
-                    messagebox.showinfo("Koniec czasu", "Twój czas na aplikacje nieproduktywne się skończył.")
+                    if self.on_limit_reached:
+                        # sygnał do GUI – bez blokowania
+                        self.on_limit_reached()
                     self.group_a_total = 0
                 
 
@@ -82,7 +85,7 @@ class MonitorThread(threading.Thread):
         # przy zatrzymaniu wątku dolicz ostatnią sesję (jeśli wystarczająco długa)
         now = time.monotonic()
         elapsed = now - self.start_time
-        if self.current and elapsed >= self.min_session:
+        if self.current:
             self.totals[self.current] = self.totals.get(self.current, 0) + elapsed
             if grupa == 0:
                 self.group_a_total += elapsed
@@ -128,6 +131,9 @@ class AppGUI:
         self.root = root
         self.root.title("Przypisywanie aplikacji do grup + monitor")
 
+
+        self.blocker_cooldown_until = 0  # timestamp do którego blokera nie pokazujemy
+
         # czcionka domyślna
         self.default_font = tkfont.Font(family="Segoe UI", size=12)
         self.root.option_add("*Font", self.default_font)
@@ -164,7 +170,7 @@ class AppGUI:
 
         # monitor w tle
         self.stop_event = threading.Event()
-        self.monitor = MonitorThread(self.stop_event, poll_interval=1.0, min_session=1.0)
+        self.monitor = MonitorThread(self.stop_event, poll_interval=1.0, min_session=1.0, on_limit_reached=self.on_limit_reached)
         self.monitor.start()
 
         # odświeżanie GUI
@@ -257,10 +263,15 @@ class AppGUI:
 
             # przed zapisem dolicz bieżącą sesję jeśli trwa i należy do grupy A
             try:
-                if self.monitor.current and listapps.grupy.get(self.monitor.current) == 0:
+                if self.monitor.current:
                     elapsed = time.monotonic() - self.monitor.start_time
-                    if elapsed >= self.monitor.min_session:
+                    if listapps.grupy.get(self.monitor.current) == 0:         
                         self.monitor.group_a_total += elapsed
+                    elif listapps.grupy.get(self.monitor.current) == 1: 
+                        if self.group_a_total < elapsed:
+                            self.group_a_total = 0
+                        else:
+                            self.group_a_total -= elapsed
                         # również zaktualizuj totals dla kompletności
                         self.monitor.totals[self.monitor.current] = self.monitor.totals.get(self.monitor.current, 0) + elapsed
             except Exception:
@@ -273,6 +284,111 @@ class AppGUI:
             print("Zapisano czas grupy A (produktywne):", int(self.monitor.group_a_total), "s")
 
             self.root.destroy()
+
+
+    def on_limit_reached(self):
+        """Wywoływane z wątku monitorującego – przekierowanie do głównego wątku Tk."""
+        now = time.time()
+        if now < self.blocker_cooldown_until:
+            return  # cooldown aktywny – nie pokazujemy blokera
+        self.root.after(0, self.show_blocker_overlay)
+
+
+    def show_blocker_overlay(self):
+        """Tworzy pełnoekranową nakładkę blokującą dalszą pracę."""
+        if hasattr(self, "blocker_window") and self.blocker_window is not None:
+            return
+
+        self.blocker_window = tk.Toplevel(self.root)
+        self.blocker_window.title("Blokada")
+        self.blocker_window.attributes("-topmost", True)
+        self.blocker_window.attributes("-fullscreen", True)
+        self.blocker_window.configure(bg="black")
+        self.blocker_window.overrideredirect(True)
+
+        # Tekst
+        label = tk.Label(
+            self.blocker_window,
+            text="Twój czas na aplikacje nieproduktywne się skończył.",
+            fg="white",
+            bg="black",
+            font=("Segoe UI", 32)
+        )
+        label.pack(pady=80)
+
+        # Przycisk: zamknij aplikację
+        btn_close = tk.Button(
+            self.blocker_window,
+            text="Zamknij tę aplikację",
+            font=("Segoe UI", 24),
+            command=self.close_nonproductive_app
+        )
+        btn_close.pack(pady=40)
+
+        # Przycisk: daj mi 2 minuty
+        btn_delay = tk.Button(
+            self.blocker_window,
+            text="Daj mi 2 minuty na zapisanie pracy",
+            font=("Segoe UI", 24),
+            command=self.delay_blocker
+        )
+        btn_delay.pack(pady=40)
+
+        # zabezpieczenie przed Alt+F4
+        self.blocker_window.protocol("WM_DELETE_WINDOW", lambda: None)
+
+        # minimalizuj aktualne okno (nieproduktywne)
+        self.minimize_active_window()
+
+        # utrzymuj topmost
+        self.enforce_blocker_topmost()
+
+    def minimize_active_window(self):
+        """Minimalizuje aktualne okno (np. nieproduktywnej aplikacji)."""
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+        except Exception:
+            pass
+
+
+    def enforce_blocker_topmost(self):
+        """Co pewien czas ponownie wymusza topmost na oknie blokady."""
+        if hasattr(self, "blocker_window") and self.blocker_window is not None:
+            try:
+                self.blocker_window.attributes("-topmost", True)
+            except Exception:
+                pass
+            self.root.after(2000, self.enforce_blocker_topmost)
+
+
+    def close_blocker_overlay(self):
+        if hasattr(self, "blocker_window") and self.blocker_window is not None:
+            try:
+                self.blocker_window.destroy()
+            except Exception:
+                pass
+            self.blocker_window = None
+
+
+    def close_nonproductive_app(self):
+
+        """Zamyka proces nieproduktywnej aplikacji."""
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+            p = psutil.Process(pid)
+            p.terminate()
+        except Exception:
+            pass
+
+        # zamknij blokera
+        self.close_blocker_overlay()
+
+    def delay_blocker(self):
+        """Zamyka blokera i ustawia 2-minutowy cooldown."""
+        self.blocker_cooldown_until = time.time() + 120  # 2 minuty
+        self.close_blocker_overlay()
 
 
 def main():
