@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+import ctypes
 import os
 import threading
 import time
@@ -134,12 +134,14 @@ class AppGUI:
 
 
         self.blocker_cooldown_until = 0  # timestamp do którego blokera nie pokazujemy
-
         # czcionka domyślna
-        self.default_font = tkfont.Font(family="Segoe UI", size=12)
+        font_path = os.path.abspath("BoldPixels.ttf") # credits BoldPixels Font by Yūki (@YukiPixels)
+        ctypes.windll.gdi32.AddFontResourceW(font_path)
+        
+        self.default_font = tkfont.Font(family="BoldPixels", size=16)
         self.root.option_add("*Font", self.default_font)
         style = ttk.Style(self.root)
-        style.configure(".", font=("Segoe UI", 12))
+        style.configure(".", font=("BoldPixels", 16))
 
         # lista aplikacji z backendu
         self.apps = listapps.get_sorted_exe_list()
