@@ -8,6 +8,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk, messagebox, filedialog
 import win32gui
+import win32con
 import win32process
 import psutil
 import json
@@ -143,11 +144,19 @@ class AppGUI:
         # lista aplikacji z backendu
         self.apps = listapps.get_sorted_exe_list()
 
+        self.apps_full = list(self.apps)  # pełna niezmieniana lista
+        # pole wyszukiwania
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(root, textvariable=self.search_var, width=40)
+        self.search_entry.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        self.search_entry.bind("<KeyRelease>", lambda e: self.filter_listbox())
+
+        
+
         # Listbox
         self.listbox = tk.Listbox(root, height=20, width=40, font=self.default_font)
         self.listbox.grid(row=1, column=0, rowspan=6, padx=10, pady=10)
-        for app in self.apps:
-            self.listbox.insert(tk.END, app)
+        self.populate_listbox()
 
         # przyciski grup
         ttk.Button(root, text="Dodaj do grupy A (produktywne)",
@@ -157,16 +166,16 @@ class AppGUI:
         ttk.Button(root, text="Usuń z grup", command=self.remove_from_group).grid(row=2, column=1, padx=10, pady=5)
 
         # przycisk: dodaj folder do skanowania
-        ttk.Button(root, text="Dodaj folder do skanowania", command=self.add_scan_folder_dialog).grid(row=0, column=0, padx=10, pady=5)
+        ttk.Button(root, text="Dodaj folder do skanowania", command=self.add_scan_folder_dialog).grid(row=7, column=0, padx=10, pady=5)
 
         # pole tekstowe z wynikami grup
         self.output = tk.Text(root, width=50, height=12, font=self.default_font)
         self.output.grid(row=4, column=1, rowspan=3, padx=10, pady=10)
 
         # pole z podsumowaniem czasu (aktualizowane okresowo)
-        ttk.Label(root, text="Czas (sekundy) spędzony przy procesach:").grid(row=7, column=0, columnspan=2, pady=(5, 0))
+        ttk.Label(root, text="Czas (sekundy) spędzony przy procesach:").grid(row=8, column=0, columnspan=2, pady=(5, 0))
         self.totals_box = tk.Text(root, width=80, height=10, font=self.default_font)
-        self.totals_box.grid(row=8, column=0, columnspan=2, padx=10, pady=(0, 10))
+        self.totals_box.grid(row=9, column=0, columnspan=2, padx=10, pady=(0, 10))
 
         # monitor w tle
         self.stop_event = threading.Event()
@@ -391,6 +400,20 @@ class AppGUI:
         self.blocker_cooldown_until = time.time() + 120  # 2 minuty
         self.close_blocker_overlay()
 
+    def populate_listbox(self):
+        """Wypełnia listbox zawartością self.apps (widoczną listą)."""
+        self.listbox.delete(0, tk.END)
+        for app in self.apps:
+            self.listbox.insert(tk.END, app)
+
+    def filter_listbox(self):
+        """Filtruje self.apps_full według wpisu w self.search_var (case-insensitive, substring)."""
+        q = self.search_var.get().lower()
+        if q == "":
+            self.apps = list(self.apps_full)
+        else:
+            self.apps = [a for a in self.apps_full if q in a.lower()]
+        self.populate_listbox()
 
 def main():
     # Etykieta: Punkt wejścia aplikacji GUI.
