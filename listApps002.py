@@ -5,6 +5,9 @@
 import os
 import json
 from pathlib import Path
+import winreg
+from pathlib import Path
+
 
 # opcjonalnie: do rozwiązywania .lnk (wymaga pywin32)
 try:
@@ -17,6 +20,27 @@ SCAN_PATHS_FILE = "scan_paths.json"
 grupy = {}           # słownik: nazwa.exe -> 0/1
 _scan_paths = []     # lista dodatkowych ścieżek do skanowania (string)
 
+LAUNCHER_REGISTRY_PATHS = {
+    "Steam": [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath"),
+    ],
+    "Epic": [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Epic Games\EpicGamesLauncher", "AppDataPath"),
+    ],
+    "GOG": [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\GOG.com\GalaxyClient", "path"),
+    ],
+    "Ubisoft": [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Ubisoft\Launcher", "InstallDir"),
+    ],
+    "EA": [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Electronic Arts\EA Desktop", "InstallLocation"),
+    ],
+    "BattleNet": [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Blizzard Entertainment\Battle.net", "InstallPath"),
+    ],
+}
 
 # ---------------- ZAPIS / ODCZYT GRUP I SCAN PATHS ----------------
 
@@ -85,6 +109,35 @@ def add_scan_path(path_str: str):
 
 
 # ---------------- SKANOWANIE APLIKACJI ----------------
+def find_paths_in_registry(registry_entries):
+    """
+    registry_entries: lista krotek (root, subkey, value_name)
+    Zwraca listę istniejących ścieżek (Path).
+    """
+    found = []
+
+    for root, subkey, value_name in registry_entries:
+        try:
+            key = winreg.OpenKey(root, subkey)
+            value, _ = winreg.QueryValueEx(key, value_name)
+            p = Path(value)
+            if p.exists():
+                found.append(p)
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+
+    return found
+
+def find_all_launcher_paths():
+    all_paths = []
+
+    for entries in LAUNCHER_REGISTRY_PATHS.values():
+        paths = find_paths_in_registry(entries)
+        all_paths.extend(paths)
+    
+    return all_paths
 
 def resolve_lnk_target(lnk_path):
     """
@@ -99,15 +152,15 @@ def resolve_lnk_target(lnk_path):
     except Exception:
         return None
 
-
-def scan_start_menu_and_desktop():
+def scan_common_locations():
     """
-    Skanuje Start Menu (user + all) oraz pulpit użytkownika i publiczny.
-    Obsługuje pliki .lnk (rozwiązuje target) oraz dodaje nazwy skrótów.
-    Zwraca set nazw (mogą zawierać nazwy plików .exe).
+    Jedna funkcja skanująca typowe lokalizacje
     """
     results = set()
 
+    # -------------------------
+    # 1. Start Menu + Desktop
+    # -------------------------
     user_start = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs")
     all_start = os.path.expandvars(r"%PROGRAMDATA%\Microsoft\Windows\Start Menu\Programs")
     user_desktop = Path.home() / "Desktop"
@@ -120,24 +173,23 @@ def scan_start_menu_and_desktop():
         if not p.exists():
             continue
 
-        # dodaj bezpośrednie pliki .exe w katalogu (i podkatalogach)
+        # .exe w Start Menu / Desktop
         for exe in p.rglob("*.exe"):
-            try:
-                results.add(exe.name)
-            except Exception:
-                continue
+            results.add(exe.name)
 
-        # .lnk: dodaj nazwę skrótu i (jeśli możliwe) basename targetu
+        # .lnk → nazwa skrótu + target
         for lnk in p.rglob("*.lnk"):
-            try:
-                display = lnk.stem.strip()
-                if display:
-                    results.add(display)
-                target = resolve_lnk_target(lnk)
-                if target:
-                    results.add(Path(target).name)
-            except Exception:
-                continue
+            display = lnk.stem.strip()
+            if display:
+                results.add(display)
+            target = resolve_lnk_target(lnk)
+            if target:
+                results.add(Path(target).name)
+    # -------------------------
+    # 2. Launchery gier/gry
+    # -------------------------
+    for launcher_path in find_all_launcher_paths():
+        results.update(scan_folder_for_exes(str(launcher_path)))
 
     return results
 
@@ -170,7 +222,7 @@ def get_sorted_exe_list():
     results = set()
 
     # podstawowy skan Start Menu + Desktop
-    results.update(scan_start_menu_and_desktop())
+    results.update(scan_common_locations())
 
     # dodatkowe ścieżki wskazane przez użytkownika
     for sp in list(_scan_paths):

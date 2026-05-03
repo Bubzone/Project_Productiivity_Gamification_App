@@ -246,6 +246,7 @@ class AppGUI:
 
         # wyświetl totals
         self.totals_box.delete("1.0", tk.END)
+        self.totals_box.insert(tk.END, f"ilosc czasu zarobionego -> {int(self.monitor.group_a_total)}\n\n")
         for proc, secs in sorted(totals.items(), key=lambda x: -x[1]):
             group = listapps.grupy.get(proc, "—")
             self.totals_box.insert(tk.END, f"{proc} -> {int(secs)} s (grupa: {group})\n")
