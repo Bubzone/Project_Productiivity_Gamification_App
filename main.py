@@ -13,6 +13,9 @@ import win32process
 import psutil
 import json
 import listApps002 as listapps  # backend
+import pystray
+from PIL import Image
+import threading
 
 TIMES_FILE = "times.json"
 
@@ -190,7 +193,7 @@ class AppGUI:
         self.update_totals_periodically()
 
         # przechwycenie zamknięcia okna
-        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.root.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
 
 
     def add_scan_folder_dialog(self):
@@ -265,37 +268,21 @@ class AppGUI:
         # zaplanuj kolejne odświeżenie za 60 sekund
         self.root.after(10000, self.update_totals_periodically)
 
+    def cleanup(self):
+        # zatrzymaj wątek monitorujący
+        self.stop_event.set()
+        self.monitor.join(timeout=2.0)
+
+        # zapisz skumulowany czas grupy A
+        self.monitor.save_times()
+
+        self.root.destroy()
 
     def on_close(self):
         """Zamyka aplikację: zatrzymuje monitor, zapisuje czas grupy A i kończy program."""
         if messagebox.askyesno("Zamknij", "Czy na pewno chcesz zamknąć aplikację?"):
-            # zatrzymaj wątek monitorujący
-            self.stop_event.set()
-            self.monitor.join(timeout=2.0)
+            self.cleanup()
 
-            # przed zapisem dolicz bieżącą sesję jeśli trwa i należy do grupy A
-            try:
-                if self.monitor.current:
-                    elapsed = time.monotonic() - self.monitor.start_time
-                    if listapps.grupy.get(self.monitor.current) == 0:         
-                        self.monitor.group_a_total += elapsed
-                    elif listapps.grupy.get(self.monitor.current) == 1: 
-                        if self.group_a_total < elapsed:
-                            self.group_a_total = 0
-                        else:
-                            self.group_a_total -= elapsed
-                        # również zaktualizuj totals dla kompletności
-                        self.monitor.totals[self.monitor.current] = self.monitor.totals.get(self.monitor.current, 0) + elapsed
-            except Exception:
-                pass
-
-            # zapisz skumulowany czas grupy A
-            self.monitor.save_times()
-
-            # opcjonalnie wypisz do konsoli (przydatne do debugu)
-            print("Zapisano czas grupy A (produktywne):", int(self.monitor.group_a_total), "s")
-
-            self.root.destroy()
 
 
     def on_limit_reached(self):
@@ -416,6 +403,31 @@ class AppGUI:
         else:
             self.apps = [a for a in self.apps_full if q in a.lower()]
         self.populate_listbox()
+
+    def minimize_to_tray(self):
+    # ukryj okno
+        self.root.withdraw()
+        # przygotuj ikonę (ikonę możesz załadować z pliku .ico lub PIL Image)
+        image = Image.open("app_icon.png")
+        menu = pystray.Menu(
+            pystray.MenuItem("Pokaż", lambda icon, item: self._tray_show(icon)),
+            pystray.MenuItem("Wyjdź", lambda icon, item: self._tray_quit(icon))
+        )
+        self.tray_icon = pystray.Icon("app", image, "Monitor", menu)
+        # uruchom ikonę w osobnym wątku, żeby nie blokować Tk
+        threading.Thread(target=self.tray_icon.run, daemon=True).start()
+
+    def _tray_show(self, icon):
+        icon.stop()
+        # bezpiecznie przywróć okno w głównym wątku Tk
+        self.root.after(0, lambda: (self.root.deiconify(), self.root.lift(), self.root.focus_force()))
+
+
+    def _tray_quit(self, icon):
+        # zatrzymaj ikonę i wykonaj pełne zamknięcie
+        icon.stop()
+        self.cleanup()
+
 
 def main():
     # Etykieta: Punkt wejścia aplikacji GUI.
