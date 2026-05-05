@@ -16,7 +16,7 @@ import listApps002 as listapps  # backend
 import pystray
 from PIL import Image
 import threading
-
+import optionsMinigame
 TIMES_FILE = "times.json"
 
 
@@ -80,7 +80,9 @@ class MonitorThread(threading.Thread):
                 if elapsed >= self.group_a_total:
                     if self.on_limit_reached:
                         # sygnał do GUI – bez blokowania
-                        self.on_limit_reached()
+                        hwnd = win32gui.GetForegroundWindow()
+                        _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                        self.on_limit_reached(pid)
                     self.group_a_total = 0
                 
 
@@ -156,8 +158,13 @@ class AppGUI:
         self.search_entry.grid(row=0, column=0, padx=10, pady=5, sticky="w")
         self.search_entry.bind("<KeyRelease>", lambda e: self.filter_listbox())
 
-        
+        # do obslugi wylaczania procesu z poziomu blokera
+        self.blocked_pid = None
+        self.blocked_proc_name = None
 
+        #apocalypse mode
+        self.apocalypse_enabled = False
+        
         # Listbox
         self.listbox = tk.Listbox(root, height=20, width=40, font=self.default_font)
         self.listbox.grid(row=1, column=0, rowspan=6, padx=10, pady=10)
@@ -172,6 +179,9 @@ class AppGUI:
 
         # przycisk: dodaj folder do skanowania
         ttk.Button(root, text="Dodaj folder do skanowania", command=self.add_scan_folder_dialog).grid(row=7, column=0, padx=10, pady=5)
+
+        #przycisk do przełaczania apocalypse mode
+        ttk.Button(root, text="Toggle Apocalypse Mode", command=self.try_toggle_apocalypse).grid(row=7, column=1, padx=10, pady=5)
 
         # pole tekstowe z wynikami grup
         self.output = tk.Text(root, width=50, height=12, font=self.default_font)
@@ -216,27 +226,32 @@ class AppGUI:
 
     def add_to_group(self, group_letter):
         """Pobiera zaznaczenie i wywołuje backendową funkcję dodającą do grupy."""
-        selection = self.listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Brak wyboru", "Najpierw wybierz aplikację z listy.")
-            return
-        idx = selection[0]
-        key = self.apps[idx]
-        group = 0 if group_letter == "A" else 1
-        listapps.add_to_group(key, group)
-        self.refresh_output()
-        
+        if not self.apocalypse_enabled:
+            selection = self.listbox.curselection()
+            if not selection:
+                messagebox.showwarning("Brak wyboru", "Najpierw wybierz aplikację z listy.")
+                return
+            idx = selection[0]
+            key = self.apps[idx]
+            group = 0 if group_letter == "A" else 1
+            listapps.add_to_group(key, group)
+            self.refresh_output()
+        else: 
+            messagebox.showwarning("Apocalypse is here!!!", "Najpierw wyłącz apocalypse mode!!!!.")
 
     def remove_from_group(self):
         """Pobiera zaznaczenie i wywołuje backendową funkcję usuwającą nazwe z grupy."""
-        selection = self.listbox.curselection()
-        if not selection:
-            messagebox.showwarning("Brak wyboru", "Najpierw wybierz aplikację z listy.")
-            return
-        idx = selection[0]
-        key = self.apps[idx]
-        listapps.remove_from_group(key)
-        self.refresh_output()
+        if not self.apocalypse_enabled:
+            selection = self.listbox.curselection()
+            if not selection:
+                messagebox.showwarning("Brak wyboru", "Najpierw wybierz aplikację z listy.")
+                return
+            idx = selection[0]
+            key = self.apps[idx]
+            listapps.remove_from_group(key)
+            self.refresh_output()
+        else:
+            messagebox.showwarning("Apocalypse is here!!!", "Najpierw wyłącz apocalypse mode!!!!.")
 
 
     def refresh_output(self):
@@ -283,13 +298,13 @@ class AppGUI:
         if messagebox.askyesno("Zamknij", "Czy na pewno chcesz zamknąć aplikację?"):
             self.cleanup()
 
-
-
-    def on_limit_reached(self):
+    def on_limit_reached(self, pid=None, name=None):
         """Wywoływane z wątku monitorującego – przekierowanie do głównego wątku Tk."""
+        self.blocked_pid = pid
+        self.blocked_proc_name = name
         now = time.time()
         if now < self.blocker_cooldown_until:
-            return  # cooldown aktywny – nie pokazujemy blokera
+            return
         self.root.after(0, self.show_blocker_overlay)
 
 
@@ -327,7 +342,7 @@ class AppGUI:
         # Przycisk: daj mi 2 minuty
         btn_delay = tk.Button(
             self.blocker_window,
-            text="Daj mi 2 minuty na zapisanie pracy",
+            text="Daj mi minute na zapisanie",
             font=("Segoe UI", 24),
             command=self.delay_blocker
         )
@@ -371,15 +386,15 @@ class AppGUI:
 
 
     def close_nonproductive_app(self):
-
-        """Zamyka proces nieproduktywnej aplikacji."""
         try:
-            hwnd = win32gui.GetForegroundWindow()
-            _, pid = win32process.GetWindowThreadProcessId(hwnd)
-            p = psutil.Process(pid)
-            p.terminate()
+            if self.blocked_pid:
+                p = psutil.Process(self.blocked_pid)
+                p.terminate()
+                p.wait(timeout=3)
         except Exception:
             pass
+        self.close_blocker_overlay()
+
 
         # zamknij blokera
         self.close_blocker_overlay()
@@ -427,6 +442,20 @@ class AppGUI:
         # zatrzymaj ikonę i wykonaj pełne zamknięcie
         icon.stop()
         self.cleanup()
+
+    def try_toggle_apocalypse(self):
+        if (self.apocalypse_enabled):
+            optionsMinigame.ApocalypseDialog(self.root, self.toggle_apocalypse)
+        else:
+            self.toggle_apocalypse()
+
+    def toggle_apocalypse(self):
+        self.apocalypse_enabled = not self.apocalypse_enabled
+        state = "ON" if self.apocalypse_enabled else "OFF"
+        messagebox.showinfo("Apocalypse Mode", f"Apocalypse mode: {state}")
+
+            
+            
 
 
 def main():
