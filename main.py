@@ -215,27 +215,58 @@ class AppGUI:
         uruchamia MonitorThread i harmonogram odświeżania.
         """
         self.root = root
-        self.root.title("Przypisywanie aplikacji do grup + monitor")
+        self.root.title("Produktywność Gamifikowana")
+        self.root.geometry("1200x700")
 
+        # === KOLORY TEMATYCZNE ===
+        self.COLOR_PRODUCTIVE = "#2ecc71"   # zielony
+        self.COLOR_UNPRODUCTIVE = "#e74c3c" # czerwony
+        self.COLOR_BG = "#ecf0f1"           # jasny szary
+        self.COLOR_TEXT = "#2c3e50"         # ciemny szary
+        self.COLOR_BORDER = "#bdc3c7"       # średni szary
+        self.COLOR_SUCCESS = "#27ae60"      # ciemny zielony
+        self.COLOR_DANGER = "#c0392b"       # ciemny czerwony
 
         self.blocker_cooldown_until = 0  # timestamp do którego blokera nie pokazujemy
         # czcionka domyślna
         font_path = os.path.abspath("BoldPixels.ttf") # credits BoldPixels Font by Yūki (@YukiPixels)
         ctypes.windll.gdi32.AddFontResourceW(font_path)
         
-        self.default_font = tkfont.Font(family="BoldPixels", size=16)
+        self.default_font = tkfont.Font(family="BoldPixels", size=14)
+        self.title_font = tkfont.Font(family="BoldPixels", size=16, weight="bold")
+        self.small_font = tkfont.Font(family="BoldPixels", size=12)
+        
         self.root.option_add("*Font", self.default_font)
         style = ttk.Style(self.root)
-        style.configure(".", font=("BoldPixels", 16))
+        style.configure(".", font=("BoldPixels", 14))
 
         # lista aplikacji z backendu
         self.apps = listapps.get_sorted_exe_list()
-
         self.apps_full = list(self.apps)  # pełna niezmieniana lista
-        # pole wyszukiwania
+        
+        # === GÓRNY PASEK STATUSU ===
+        status_frame = tk.Frame(root, bg=self.COLOR_TEXT, height=50)
+        status_frame.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=0, pady=0)
+        status_frame.rowconfigure(0, weight=1)
+        status_frame.columnconfigure(0, weight=1)
+        status_frame.columnconfigure(1, weight=0)
+
+        status_label = tk.Label(status_frame, text="📊 MONITOR AKTYWNOŚCI", 
+                               font=self.title_font, fg="white", bg=self.COLOR_TEXT)
+        status_label.grid(row=0, column=0, padx=15, pady=10, sticky="w")
+
+        self.monitor_status_label = tk.Label(status_frame, text="🔴 Monitoring: ON",
+                                            font=self.default_font, fg="#2ecc71", bg=self.COLOR_TEXT)
+        self.monitor_status_label.grid(row=0, column=1, padx=15, pady=10, sticky="e")
+
+        # === WYSZUKIWANIE ===
+        search_frame = tk.Frame(root, bg=self.COLOR_BG)
+        search_frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=5)
+        
+        tk.Label(search_frame, text="Szukaj:", font=self.default_font, bg=self.COLOR_BG, fg=self.COLOR_TEXT).pack(side="left", padx=5)
         self.search_var = tk.StringVar()
-        self.search_entry = ttk.Entry(root, textvariable=self.search_var, width=40)
-        self.search_entry.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        self.search_entry = tk.Entry(search_frame, textvariable=self.search_var, font=self.default_font, width=50)
+        self.search_entry.pack(side="left", padx=5, fill="x", expand=True)
         self.search_entry.bind("<KeyRelease>", lambda e: self.filter_listbox())
 
         # do obslugi wylaczania procesu z poziomu blokera
@@ -245,44 +276,158 @@ class AppGUI:
         #apocalypse mode
         self.apocalypse_enabled = self._load_apocalypse_state()
         
-        # Listbox
-        self.listbox = tk.Listbox(root, height=20, width=40, font=self.default_font)
-        self.listbox.grid(row=1, column=0, rowspan=6, padx=10, pady=10)
+        # === GŁÓWNA ZAWARTOŚĆ - NOTEBOOK (TABY) ===
+        main_container = tk.Frame(root, bg=self.COLOR_BG)
+        main_container.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=10, pady=10)
+        main_container.rowconfigure(0, weight=1)
+        main_container.columnconfigure(0, weight=1)
+        
+        self.root.rowconfigure(0, weight=0)   # status bar
+        self.root.rowconfigure(1, weight=0)   # search bar
+        self.root.rowconfigure(2, weight=1)   # main content
+        self.root.columnconfigure(0, weight=1)
+
+        notebook = ttk.Notebook(main_container)
+        notebook.grid(row=0, column=0, sticky="nsew")
+
+        # === TAB 1: ZARZĄDZANIE GRUPAMI ===
+        tab_groups = tk.Frame(notebook, bg=self.COLOR_BG)
+        notebook.add(tab_groups, text="📋 Zarządzanie Grupami")
+        tab_groups.rowconfigure(0, weight=1)
+        tab_groups.columnconfigure(0, weight=1)
+        tab_groups.columnconfigure(1, weight=1)
+
+        # Left: Listbox
+        list_frame = tk.Frame(tab_groups, bg=self.COLOR_BG)
+        list_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        list_frame.rowconfigure(0, weight=1)
+        list_frame.columnconfigure(0, weight=1)
+
+        tk.Label(list_frame, text="DOSTĘPNE APLIKACJE", font=self.title_font, 
+                bg=self.COLOR_BG, fg=self.COLOR_TEXT).pack(fill="x", pady=(0, 5))
+
+        self.listbox = tk.Listbox(list_frame, font=self.default_font, bg="white", 
+                                  fg=self.COLOR_TEXT, selectmode="single", height=15)
+        self.listbox.pack(side="left", fill="both", expand=True)
         self.populate_listbox()
 
-        # przyciski grup
-        ttk.Button(root, text="Dodaj do grupy A (produktywne)",
-                   command=lambda: self.add_to_group("A")).grid(row=0, column=1, padx=10, pady=5)
-        ttk.Button(root, text="Dodaj do grupy B (nieproduktywne)",
-                   command=lambda: self.add_to_group("B")).grid(row=1, column=1, padx=10, pady=5)
-        ttk.Button(root, text="Usuń z grup", command=self.remove_from_group).grid(row=2, column=1, padx=10, pady=5)
-        
-        ttk.Button(root, text="Dodaj stronę", command=self.open_add_site_dialog).grid(row=3, column=1, padx=10, pady=5)
+        scroll = ttk.Scrollbar(list_frame, orient="vertical", command=self.listbox.yview)
+        self.listbox.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
 
-        # przycisk: dodaj folder do skanowania
-        ttk.Button(root, text="Dodaj folder do skanowania", command=self.add_scan_folder_dialog).grid(row=7, column=0, padx=10, pady=5)
+        # Right: Buttons
+        buttons_frame = tk.Frame(tab_groups, bg=self.COLOR_BG)
+        buttons_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
-        #przycisk do przełaczania apocalypse mode
-        ttk.Button(root, text="Toggle Apocalypse Mode", command=self.try_toggle_apocalypse).grid(row=7, column=1, padx=10, pady=5)
+        # Section 1: Grupy
+        section1 = tk.LabelFrame(buttons_frame, text="PRZYPISZ DO GRUPY", 
+                                font=self.title_font, bg=self.COLOR_BG, fg=self.COLOR_TEXT)
+        section1.pack(fill="x", pady=10)
 
-        # pole tekstowe z wynikami grup
-        self.output = tk.Text(root, width=50, height=12, font=self.default_font)
-        self.output.grid(row=4, column=1, rowspan=3, padx=10, pady=10)
+        btn_a = tk.Button(section1, text="✅ PRODUKTYWNE (Grupa A)", 
+                         font=self.default_font, bg=self.COLOR_PRODUCTIVE, fg="white",
+                         command=lambda: self.add_to_group("A"), padx=10, pady=10, relief="raised", bd=2)
+        btn_a.pack(fill="x", padx=10, pady=5)
 
-        # pole z podsumowaniem czasu (aktualizowane okresowo)
-        ttk.Label(root, text="Czas (sekundy) spędzony przy procesach:").grid(row=8, column=0, columnspan=2, pady=(5, 0))
-        self.totals_box = tk.Text(root, width=80, height=10, font=self.default_font)
-        self.totals_box.grid(row=9, column=0, columnspan=2, padx=10, pady=(0, 10))
+        btn_b = tk.Button(section1, text="❌ NIEPRODUKTYWNE (Grupa B)", 
+                         font=self.default_font, bg=self.COLOR_UNPRODUCTIVE, fg="white",
+                         command=lambda: self.add_to_group("B"), padx=10, pady=10, relief="raised", bd=2)
+        btn_b.pack(fill="x", padx=10, pady=5)
 
-        # monitor w tle
+        btn_remove = tk.Button(section1, text="🗑️ USUŃ Z GRUP", 
+                              font=self.default_font, bg=self.COLOR_BORDER, fg=self.COLOR_TEXT,
+                              command=self.remove_from_group, padx=10, pady=10, relief="raised", bd=2)
+        btn_remove.pack(fill="x", padx=10, pady=5)
+
+        # Section 2: Zarządzanie
+        section2 = tk.LabelFrame(buttons_frame, text="ZARZĄDZANIE", 
+                                font=self.title_font, bg=self.COLOR_BG, fg=self.COLOR_TEXT)
+        section2.pack(fill="x", pady=10)
+
+        btn_site = tk.Button(section2, text="➕ DODAJ STRONĘ", 
+                            font=self.default_font, bg="#3498db", fg="white",
+                            command=self.open_add_site_dialog, padx=10, pady=8, relief="raised", bd=2)
+        btn_site.pack(fill="x", padx=10, pady=5)
+
+        btn_folder = tk.Button(section2, text="📁 DODAJ FOLDER DO SKANOWANIA", 
+                              font=self.default_font, bg="#9b59b6", fg="white",
+                              command=self.add_scan_folder_dialog, padx=10, pady=8, relief="raised", bd=2)
+        btn_folder.pack(fill="x", padx=10, pady=5)
+
+        # Section 3: Apocalypse
+        section3 = tk.LabelFrame(buttons_frame, text="TRYB APOCALYPSE", 
+                                font=self.title_font, bg=self.COLOR_BG, fg=self.COLOR_TEXT)
+        section3.pack(fill="x", pady=10)
+
+        btn_apocalypse = tk.Button(section3, text="⚔️ TOGGLE APOCALYPSE MODE", 
+                                  font=self.default_font, bg="#e67e22", fg="white",
+                                  command=self.try_toggle_apocalypse, padx=10, pady=10, relief="raised", bd=2)
+        btn_apocalypse.pack(fill="x", padx=10, pady=5)
+
+        # === TAB 2: GRUPY ===
+        tab_overview = tk.Frame(notebook, bg=self.COLOR_BG)
+        notebook.add(tab_overview, text="📊 Przegląd Grup")
+        tab_overview.rowconfigure(0, weight=1)
+        tab_overview.columnconfigure(0, weight=1)
+
+        self.output = tk.Text(tab_overview, font=self.default_font, bg="white", 
+                             fg=self.COLOR_TEXT, wrap="word")
+        self.output.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        # Tagi do kolorowania
+        self.output.tag_configure("productive_header", foreground="white", background=self.COLOR_SUCCESS, font=self.title_font)
+        self.output.tag_configure("unproductive_header", foreground="white", background=self.COLOR_DANGER, font=self.title_font)
+        self.output.tag_configure("productive_text", foreground=self.COLOR_SUCCESS, font=self.default_font)
+        self.output.tag_configure("unproductive_text", foreground=self.COLOR_DANGER, font=self.default_font)
+        self.output.tag_configure("section_label", foreground=self.COLOR_TEXT, font=self.small_font, underline=True)
+
+        scroll_output = ttk.Scrollbar(tab_overview, orient="vertical", command=self.output.yview)
+        self.output.configure(yscrollcommand=scroll_output.set)
+        scroll_output.grid(row=0, column=1, sticky="ns")
+
+        # === TAB 3: STATYSTYKI ===
+        tab_stats = tk.Frame(notebook, bg=self.COLOR_BG)
+        notebook.add(tab_stats, text="⏱️ Statystyki Czasu")
+        tab_stats.rowconfigure(1, weight=1)
+        tab_stats.columnconfigure(0, weight=1)
+
+        # Podsumowanie zarobionego czasu
+        summary_frame = tk.Frame(tab_stats, bg=self.COLOR_SUCCESS, bd=2, relief="raised")
+        summary_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+
+        tk.Label(summary_frame, text="💰 ZAROBIONY CZAS NA GRUPY A (PRODUKTYWNE):", 
+                font=self.title_font, bg=self.COLOR_SUCCESS, fg="white").pack(padx=10, pady=5, side="left")
+
+        self.earned_time_label = tk.Label(summary_frame, text="0 sekund", 
+                                         font=self.title_font, bg=self.COLOR_SUCCESS, fg="white")
+        self.earned_time_label.pack(padx=10, pady=5, side="right")
+
+        # Tabela czasów
+        tk.Label(tab_stats, text="CZAS SPĘDZONY PRZY PROCESACH:", font=self.title_font, 
+                bg=self.COLOR_BG, fg=self.COLOR_TEXT).grid(row=1, column=0, padx=10, pady=(10, 5), sticky="nw")
+
+        self.totals_box = tk.Text(tab_stats, font=self.default_font, bg="white", 
+                                 fg=self.COLOR_TEXT, wrap="word")
+        self.totals_box.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        tab_stats.rowconfigure(2, weight=1)
+
+        scroll_totals = ttk.Scrollbar(tab_stats, orient="vertical", command=self.totals_box.yview)
+        self.totals_box.configure(yscrollcommand=scroll_totals.set)
+        scroll_totals.grid(row=2, column=1, sticky="ns", padx=(0, 10), pady=(0, 10))
+
+        # Tagi do kolorowania czasu
+        self.totals_box.tag_configure("productive", foreground=self.COLOR_SUCCESS)
+        self.totals_box.tag_configure("unproductive", foreground=self.COLOR_DANGER)
+
+        # === MONITOR W TLE ===
         self.stop_event = threading.Event()
         self.monitor = MonitorThread(self.stop_event, poll_interval=1.0, min_session=1.0, on_limit_reached=self.on_limit_reached)
         self.monitor.start()
 
         # odświeżanie GUI
         self.refresh_output()
-        # pierwsze natychmiastowe uaktualnienie, potem co 60s (60000 ms)
         self.update_totals_periodically()
+        self.update_monitor_status()
 
         # przechwycenie zamknięcia okna
         self.root.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
@@ -337,26 +482,51 @@ class AppGUI:
 
 
     def refresh_output(self):
+        """Odświeża widok grup z kolorystyką tematyczną."""
         self.output.delete("1.0", tk.END)
-        self.output.insert(tk.END, "--------PRODUKTYWNE-------- \n\n -----aplikacje-----\n")
-        for k, v in listapps.grupy.items():
-            if v==0:
-                self.output.insert(tk.END, f"{k}\n")
-        self.output.insert(tk.END, "-----strony-----\n")
-        for k, v in sites.sites.items():
-            if v==0:
-                self.output.insert(tk.END, f"{k}\n")
+        
+        # Sekcja PRODUKTYWNE
+        self.output.insert(tk.END, "\n✅ GRUPA A: APLIKACJE PRODUKTYWNE\n", "productive_header")
+        self.output.insert(tk.END, "=" * 50 + "\n", "productive_header")
+        
+        if any(v == 0 for v in listapps.grupy.values()) or any(v == 0 for v in sites.sites.values()):
+            self.output.insert(tk.END, "\n[APLIKACJE]\n", "section_label")
+            for k, v in listapps.grupy.items():
+                if v == 0:
+                    self.output.insert(tk.END, f"  • {k}\n", "productive_text")
+            
+            self.output.insert(tk.END, "\n[STRONY]\n", "section_label")
+            for k, v in sites.sites.items():
+                if v == 0:
+                    self.output.insert(tk.END, f"  • {k}\n", "productive_text")
+        else:
+            self.output.insert(tk.END, "  (brak)", "productive_text")
+        
+        # Sekcja NIEPRODUKTYWNE
+        self.output.insert(tk.END, "\n\n\u274c GRUPA B: APLIKACJE NIEPRODUKTYWNE\n", "unproductive_header")
+        self.output.insert(tk.END, "=" * 50 + "\n", "unproductive_header")
+        
+        if any(v == 1 for v in listapps.grupy.values()) or any(v == 1 for v in sites.sites.values()):
+            self.output.insert(tk.END, "\n[APLIKACJE]\n", "section_label")
+            for k, v in listapps.grupy.items():
+                if v == 1:
+                    self.output.insert(tk.END, f"  • {k}\n", "unproductive_text")
+            
+            self.output.insert(tk.END, "\n[STRONY]\n", "section_label")
+            for k, v in sites.sites.items():
+                if v == 1:
+                    self.output.insert(tk.END, f"  • {k}\n", "unproductive_text")
+        else:
+            self.output.insert(tk.END, "  (brak)", "unproductive_text")
 
-        self.output.insert(tk.END, "--------NIEPRODUKTYWNE-------- \n\n -----aplikacje-----\n")
-        for k, v in listapps.grupy.items():
-            if v==1:
-                self.output.insert(tk.END, f"{k}\n")
-        self.output.insert(tk.END, "-----strony-----\n")
-        for k, v in sites.sites.items():
-            if v==1:
-                self.output.insert(tk.END, f"{k}\n")
 
 
+    def update_monitor_status(self):
+        """Aktualizuje status monitora w pasku górnym."""
+        if hasattr(self, "monitor_status_label"):
+            status = "🟢 Monitoring: ON" if not self.stop_event.is_set() else "🔴 Monitoring: OFF"
+            self.monitor_status_label.config(text=status)
+        self.root.after(2000, self.update_monitor_status)
 
     def update_totals_periodically(self):
         """
@@ -370,19 +540,37 @@ class AppGUI:
             elapsed = time.monotonic() - self.monitor.start_time
             totals[self.monitor.current] = totals.get(self.monitor.current, 0) + elapsed
 
-        # wyświetl totals
-        self.totals_box.delete("1.0", tk.END)
-        self.totals_box.insert(tk.END, f"ilosc czasu zarobionego -> {int(self.monitor.group_a_total)}\n\n")
-        for proc, secs in sorted(totals.items(), key=lambda x: -x[1]):
-            if listapps.grupy.get(proc) is not None:
-                group = listapps.grupy.get(proc)
-            elif sites.sites.get(proc) is not None:
-                group = sites.sites.get(proc)
-            else:
-                group = "-"
-            self.totals_box.insert(tk.END, f"{proc} -> {int(secs)} s (grupa: {group})\n")
+        # Aktualizuj etykietę zarobionego czasu
+        hours = int(self.monitor.group_a_total) // 3600
+        minutes = (int(self.monitor.group_a_total) % 3600) // 60
+        seconds = int(self.monitor.group_a_total) % 60
+        time_str = f"{hours}h {minutes}m {seconds}s"
+        self.earned_time_label.config(text=time_str)
 
-        # zaplanuj kolejne odświeżenie za 60 sekund
+        # Wyświetl tabela czasów
+        self.totals_box.delete("1.0", tk.END)
+        
+        if not totals:
+            self.totals_box.insert(tk.END, "Brak danych do wyświetlenia. Zaczekaj na pierwsze dane z monitora.")
+        else:
+            self.totals_box.insert(tk.END, f"{'Proces':<40} | {'Czas':>6} | {'Grupa':<20}\n")
+            self.totals_box.insert(tk.END, "=" * 75 + "\n")
+            
+            for proc, secs in sorted(totals.items(), key=lambda x: -x[1]):
+                if listapps.grupy.get(proc) is not None:
+                    group = listapps.grupy.get(proc)
+                    tag = "productive" if group == 0 else "unproductive"
+                elif sites.sites.get(proc) is not None:
+                    group = sites.sites.get(proc)
+                    tag = "productive" if group == 0 else "unproductive"
+                else:
+                    group = "-"
+                    tag = "productive"
+                
+                group_name = "(A) Produktywne" if group == 0 else "(B) Nieproduktywne" if group == 1 else "(Nieznana)"
+                self.totals_box.insert(tk.END, f"{proc:<40} | {int(secs):>5} s | {group_name:<20}\n", tag)
+
+        # zaplanuj kolejne odświeżenie za 10 sekund
         self.root.after(10000, self.update_totals_periodically)
 
     def cleanup(self):
@@ -581,7 +769,10 @@ class AppGUI:
             pass
             
     def open_add_site_dialog(self):
-        sites.AddSiteDialog(self.root, on_submit=self._on_site_added)
+        if not self.apocalypse_enabled:
+            sites.AddSiteDialog(self.root, on_submit=self._on_site_added)
+        else:
+            messagebox.showwarning("Apocalypse is here!!!", "Najpierw wyłącz apocalypse mode!!!!.")
 
     def _on_site_added(self, keyword: str, group: int):
         # zapis do sites.py
