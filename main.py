@@ -19,7 +19,10 @@ import threading
 import optionsMinigame
 import sites
 
-TIMES_FILE = "times.json"
+TIMES_PATH_FILE = "times_path.json"   # plik przechowujący ścieżkę do times.json
+DEFAULT_TIMES_FILE = "times.json"     # domyślna lokalizacja
+times_file_path = DEFAULT_TIMES_FILE  # aktualnie używana ścieżka
+
 APOCALYPSE_FILE = "apocalypse_state.json"
 BROWSER_EXES = {"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe"}
 
@@ -73,11 +76,12 @@ class MonitorThread(threading.Thread):
                         hwnd = win32gui.GetForegroundWindow()
                         title = win32gui.GetWindowText(hwnd) if hwnd else ""
                         for k, v in sites.sites.items():
-                            if k in title:
+                            if k.lower() in title.lower():
                                 active_key = k
                                 site = True
                                 break
-                        active_key=name
+                            active_key=name
+                            site=False
 
                     except Exception:
                         print(Exception)
@@ -85,8 +89,10 @@ class MonitorThread(threading.Thread):
                     
                 else:
                     active_key = name
+                    site = False
             else:
                 active_key = None
+                site = False
 
             if active_key != self.current:
                 elapsed = now - self.start_time
@@ -137,7 +143,7 @@ class MonitorThread(threading.Thread):
         """Zapisuje czas grupy A do pliku JSON."""
         try:
             data = {"group_a_seconds": int(self.group_a_total)}
-            with open(TIMES_FILE, "w", encoding="utf-8") as f:
+            with open(times_file_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=4, ensure_ascii=False)
         except Exception:
             pass
@@ -145,14 +151,57 @@ class MonitorThread(threading.Thread):
 
     def load_times(self):
         """Wczytuje zapisany czas grupy A (jeśli istnieje). Zwraca liczbę sekund lub 0."""
-        if not os.path.exists(TIMES_FILE):
+        if not os.path.exists(times_file_path):
             return 0
         try:
-            with open(TIMES_FILE, "r", encoding="utf-8") as f:
+            with open(times_file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 return int(data.get("group_a_seconds", 0))
         except Exception:
             return 0
+        
+    def load_times_path():
+        """
+        Wczytuje ścieżkę do pliku times.json z pliku times_path.json.
+        Jeśli plik nie istnieje lub jest błędny → używa domyślnej ścieżki.
+        """
+        global times_file_path
+
+        if not os.path.exists(TIMES_PATH_FILE):
+            times_file_path = DEFAULT_TIMES_FILE
+            return
+        try:
+            with open(TIMES_PATH_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                custom_path = data.get("times_file")
+
+                if isinstance(custom_path, str) and custom_path.strip():
+                    times_file_path = custom_path.strip()
+                else:
+                    times_file_path = DEFAULT_TIMES_FILE
+        except Exception:
+            times_file_path = DEFAULT_TIMES_FILE
+    def save_times_path(new_path: str):
+        """
+        Zapisuje nową ścieżkę do pliku times_path.json i aktualizuje zmienną globalną.
+        """
+        global times_file_path
+        new_path = new_path.strip()
+
+        if not new_path:
+            return False
+
+        try:
+            with open(TIMES_PATH_FILE, "w", encoding="utf-8") as f:
+                json.dump({"times_file": new_path}, f, indent=4, ensure_ascii=False)
+
+            times_file_path = new_path
+            return True
+
+        except Exception:
+            return False
+
+
 
 
 class AppGUI:
@@ -207,6 +256,7 @@ class AppGUI:
         ttk.Button(root, text="Dodaj do grupy B (nieproduktywne)",
                    command=lambda: self.add_to_group("B")).grid(row=1, column=1, padx=10, pady=5)
         ttk.Button(root, text="Usuń z grup", command=self.remove_from_group).grid(row=2, column=1, padx=10, pady=5)
+        
         ttk.Button(root, text="Dodaj stronę", command=self.open_add_site_dialog).grid(row=3, column=1, padx=10, pady=5)
 
         # przycisk: dodaj folder do skanowania
@@ -324,7 +374,12 @@ class AppGUI:
         self.totals_box.delete("1.0", tk.END)
         self.totals_box.insert(tk.END, f"ilosc czasu zarobionego -> {int(self.monitor.group_a_total)}\n\n")
         for proc, secs in sorted(totals.items(), key=lambda x: -x[1]):
-            group = listapps.grupy.get(proc, "—")
+            if listapps.grupy.get(proc) is not None:
+                group = listapps.grupy.get(proc)
+            elif sites.sites.get(proc) is not None:
+                group = sites.sites.get(proc)
+            else:
+                group = "-"
             self.totals_box.insert(tk.END, f"{proc} -> {int(secs)} s (grupa: {group})\n")
 
         # zaplanuj kolejne odświeżenie za 60 sekund
