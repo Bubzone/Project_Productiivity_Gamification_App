@@ -17,8 +17,11 @@ import pystray
 from PIL import Image
 import threading
 import optionsMinigame
-TIMES_FILE = "times.json"
+import sites
 
+TIMES_FILE = "times.json"
+APOCALYPSE_FILE = "apocalypse_state.json"
+BROWSER_EXES = {"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe"}
 
 class MonitorThread(threading.Thread):
     def __init__(self, stop_event, poll_interval=1.0, min_session=1.0, on_limit_reached=None):
@@ -60,7 +63,32 @@ class MonitorThread(threading.Thread):
             name = self.get_active_process()
             now = time.monotonic()
 
-            if name != self.current:
+            # zbuduj klucz aktywności: dla przeglądarki -> "site:<nazwa>", w przeciwnym razie nazwa procesu
+            active_key = None
+            site=False
+            if name:
+                if name.lower() in BROWSER_EXES:
+                    try:
+                        # pobierz tytuł okna i spróbuj wyciągnąć nazwę strony
+                        hwnd = win32gui.GetForegroundWindow()
+                        title = win32gui.GetWindowText(hwnd) if hwnd else ""
+                        for k, v in sites.sites.items():
+                            if k in title:
+                                active_key = k
+                                site = True
+                                break
+                        active_key=name
+
+                    except Exception:
+                        print(Exception)
+                        active_key = name
+                    
+                else:
+                    active_key = name
+            else:
+                active_key = None
+
+            if active_key != self.current:
                 elapsed = now - self.start_time
                 if self.current:
                     self.totals[self.current] = self.totals.get(self.current, 0) + elapsed
@@ -71,9 +99,12 @@ class MonitorThread(threading.Thread):
                             self.group_a_total = 0
                         else:
                             self.group_a_total -= elapsed
-                self.current = name
+                self.current = active_key
                 self.start_time = now
-                grupa = listapps.grupy.get(self.current)
+                if site:
+                    grupa = sites.sites[self.current]
+                else:
+                    grupa = listapps.grupy.get(self.current)
             
             if grupa == 1:
                 elapsed = now - self.start_time
@@ -163,7 +194,7 @@ class AppGUI:
         self.blocked_proc_name = None
 
         #apocalypse mode
-        self.apocalypse_enabled = False
+        self.apocalypse_enabled = self._load_apocalypse_state()
         
         # Listbox
         self.listbox = tk.Listbox(root, height=20, width=40, font=self.default_font)
@@ -176,6 +207,7 @@ class AppGUI:
         ttk.Button(root, text="Dodaj do grupy B (nieproduktywne)",
                    command=lambda: self.add_to_group("B")).grid(row=1, column=1, padx=10, pady=5)
         ttk.Button(root, text="Usuń z grup", command=self.remove_from_group).grid(row=2, column=1, padx=10, pady=5)
+        ttk.Button(root, text="Dodaj stronę", command=self.open_add_site_dialog).grid(row=3, column=1, padx=10, pady=5)
 
         # przycisk: dodaj folder do skanowania
         ttk.Button(root, text="Dodaj folder do skanowania", command=self.add_scan_folder_dialog).grid(row=7, column=0, padx=10, pady=5)
@@ -255,10 +287,25 @@ class AppGUI:
 
 
     def refresh_output(self):
-        """Odświeża wyświetlanie słownika grup."""
         self.output.delete("1.0", tk.END)
+        self.output.insert(tk.END, "--------PRODUKTYWNE-------- \n\n -----aplikacje-----\n")
         for k, v in listapps.grupy.items():
-            self.output.insert(tk.END, f"{k} -> {v}\n")
+            if v==0:
+                self.output.insert(tk.END, f"{k}\n")
+        self.output.insert(tk.END, "-----strony-----\n")
+        for k, v in sites.sites.items():
+            if v==0:
+                self.output.insert(tk.END, f"{k}\n")
+
+        self.output.insert(tk.END, "--------NIEPRODUKTYWNE-------- \n\n -----aplikacje-----\n")
+        for k, v in listapps.grupy.items():
+            if v==1:
+                self.output.insert(tk.END, f"{k}\n")
+        self.output.insert(tk.END, "-----strony-----\n")
+        for k, v in sites.sites.items():
+            if v==1:
+                self.output.insert(tk.END, f"{k}\n")
+
 
 
     def update_totals_periodically(self):
@@ -287,6 +334,9 @@ class AppGUI:
         # zatrzymaj wątek monitorujący
         self.stop_event.set()
         self.monitor.join(timeout=2.0)
+
+        self._save_apocalypse_state()
+
 
         # zapisz skumulowany czas grupy A
         self.monitor.save_times()
@@ -454,8 +504,37 @@ class AppGUI:
         state = "ON" if self.apocalypse_enabled else "OFF"
         messagebox.showinfo("Apocalypse Mode", f"Apocalypse mode: {state}")
 
+    def _load_apocalypse_state(self):
+        """Wczytuje stan Apocalypse z pliku. Zwraca bool."""
+        try:
+            path = APOCALYPSE_FILE
+            if not os.path.exists(path):
+                return False
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return bool(data.get("apocalypse_enabled", False))
+        except Exception:
+            return False
+
+    def _save_apocalypse_state(self):
+        """Zapisuje aktualny stan self.apocalypse_enabled do pliku (atomowo)."""
+        try:
+            path = APOCALYPSE_FILE
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"apocalypse_enabled": bool(self.apocalypse_enabled)}, f, indent=2, ensure_ascii=False)
+        except Exception:
+            pass
             
-            
+    def open_add_site_dialog(self):
+        sites.AddSiteDialog(self.root, on_submit=self._on_site_added)
+
+    def _on_site_added(self, keyword: str, group: int):
+        # zapis do sites.py
+        sites.add_site(keyword, group)
+        # odśwież widoki (np. output i ewentualne listy)
+        self.refresh_output()
+        messagebox.showinfo("Dodano", f"Dodano stronę '{keyword}' do grupy {'A' if group==0 else 'B'}.")
+
 
 
 def main():
