@@ -151,7 +151,7 @@ class MonitorThread(threading.Thread):
         except Exception:
             return 0
         
-    def load_times_path():
+    def load_times_path(self):
         """
         Wczytuje ścieżkę do pliku times.json z pliku times_path.json.
         Jeśli plik nie istnieje lub jest błędny → używa domyślnej ścieżki.
@@ -172,7 +172,8 @@ class MonitorThread(threading.Thread):
                     times_file_path = DEFAULT_TIMES_FILE
         except Exception:
             times_file_path = DEFAULT_TIMES_FILE
-    def save_times_path(new_path: str):
+
+    def save_times_path(self, new_path: str):
         """
         Zapisuje nową ścieżkę do pliku times_path.json i aktualizuje zmienną globalną.
         """

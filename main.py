@@ -170,6 +170,11 @@ class AppGUI:
                               command=self.add_scan_folder_dialog, padx=10, pady=8, relief="raised", bd=2)
         btn_folder.pack(fill="x", padx=10, pady=5)
 
+        btn_times_path = tk.Button(section2, text="📂 WYBIERZ ŚCIEŻKĘ DO TIMES.JSON", 
+                                  font=self.default_font, bg="#f39c12", fg="white",
+                                  command=self.choose_times_file_path, padx=10, pady=8, relief="raised", bd=2)
+        btn_times_path.pack(fill="x", padx=10, pady=5)
+
         # Section 3: Apocalypse
         section3 = tk.LabelFrame(buttons_frame, text="TRYB APOCALYPSE", 
                                 font=self.title_font, bg=self.COLOR_BG, fg=self.COLOR_TEXT)
@@ -265,6 +270,46 @@ class AppGUI:
             self.listbox.insert(tk.END, app)
         self.refresh_output()
         messagebox.showinfo("Sukces", f"Dodano folder do skanowania:\n{folder}")
+
+
+    def choose_times_file_path(self):
+        """Otwiera dialog wyboru ścieżki do pliku times.json i zapisuje nową ścieżkę."""
+        # Otwórz dialog wyboru pliku
+        file_path = filedialog.asksaveasfilename(
+            title="Wybierz ścieżkę do pliku times.json",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="times.json"
+        )
+        if not file_path:
+            return
+        success = self.monitor.save_times_path(file_path)
+
+        # Sprawdź, czy w obecnym pliku jest jakiś czas
+        if success:
+            current_time = self.monitor.load_times()
+            if current_time > 0:
+                response = messagebox.askyesno(
+                    "Potwierdzenie",
+                    f"W obecnym pliku times.json jest zapisany czas: {current_time} sekund.\n"
+                    "Czy chcesz przepisać ten czas do nowego pliku?"
+                )
+                if not response:
+                    return
+                else:
+                    try:
+                        data = {"group_a_seconds": int(current_time)}
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            json.dump(data, f, indent=4, ensure_ascii=False)
+                    except Exception as e:
+                        messagebox.showerror("Błąd", f"Nie udało się przepisać danych: {e}")
+                        return
+
+            messagebox.showinfo("Sukces", f"Nowa ścieżka do times.json została ustawiona:\n{file_path}")
+            # Odśwież statystyki
+            self.update_totals_periodically()
+        else:
+            messagebox.showerror("Błąd", "Nie udało się zapisać nowej ścieżki.")
 
 
     def add_to_group(self, group_letter):
@@ -424,7 +469,7 @@ class AppGUI:
         self.blocker_window.attributes("-fullscreen", True)
         self.blocker_window.configure(bg="black")
         self.blocker_window.overrideredirect(True)
-        
+
         # Tekst
         label = tk.Label(
             self.blocker_window,
