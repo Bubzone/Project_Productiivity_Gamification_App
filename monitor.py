@@ -6,13 +6,14 @@ import time
 import json
 import os
 import sites
-
+import winreg
 import listApps002 as listapps  # backend
-
+import sys
 
 TIMES_PATH_FILE = "times_path.json"   # plik przechowujący ścieżkę do times.json
 DEFAULT_TIMES_FILE = "times.json"     # domyślna lokalizacja
 times_file_path = DEFAULT_TIMES_FILE  # aktualnie używana ścieżka
+AUTOSTART_REGISTRY_NAME = "Project_Productivity_Gamification_App"
 
 
 BROWSER_EXES = {"chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe"}
@@ -192,4 +193,54 @@ class MonitorThread(threading.Thread):
 
         except Exception:
             return False
+
+    def enable_autostart(self, app_name, exe_path):
+        # Otwieramy klucz Run w rejestrze
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            0,
+            winreg.KEY_SET_VALUE
+        )
+        
+        # Dodajemy wpis
+        winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, self.get_exe_path())
+        winreg.CloseKey(key)
+
+    def disable_autostart(self, app_name):
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run",
+                0,
+                winreg.KEY_SET_VALUE
+            )
+            winreg.DeleteValue(key, app_name)
+            winreg.CloseKey(key)
+        except FileNotFoundError:
+            pass
+
+    @staticmethod
+    def load_autostart_state():
+        try:
+            key = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run",
+                0,
+                winreg.KEY_READ
+            )
+            winreg.QueryValueEx(key, AUTOSTART_REGISTRY_NAME)
+            winreg.CloseKey(key)
+            return True
+        except (FileNotFoundError, OSError):
+            return False
+    
+    def get_exe_path(self):
+        if getattr(sys, 'frozen', False):
+            # Program działa jako EXE
+            return sys.executable
+        else:
+            # Program działa jako skrypt .py
+            return os.path.abspath(__file__)
+
 

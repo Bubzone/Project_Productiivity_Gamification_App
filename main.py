@@ -131,9 +131,32 @@ class AppGUI:
         self.listbox.configure(yscrollcommand=scroll.set)
         scroll.pack(side="right", fill="y")
 
-        # Right: Buttons
-        buttons_frame = tk.Frame(tab_groups, bg=self.COLOR_BG)
-        buttons_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        # Right: Buttons with scrollbar
+        buttons_canvas = tk.Canvas(tab_groups, bg=self.COLOR_BG, highlightthickness=0)
+        buttons_canvas.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+
+        buttons_scrollbar = ttk.Scrollbar(tab_groups, orient="vertical", command=buttons_canvas.yview)
+        buttons_scrollbar.grid(row=0, column=2, sticky="ns", padx=(0, 10), pady=10)
+
+        buttons_canvas.configure(yscrollcommand=buttons_scrollbar.set)
+
+        buttons_frame = tk.Frame(buttons_canvas, bg=self.COLOR_BG)
+        self.buttons_window = buttons_canvas.create_window((0, 0), window=buttons_frame, anchor="nw")
+
+        def configure_scroll_region(event):
+            buttons_canvas.configure(scrollregion=buttons_canvas.bbox("all"))
+
+        def configure_canvas_size(event):
+            canvas_width = event.width
+            buttons_canvas.itemconfig(self.buttons_window, width=canvas_width)
+
+        buttons_frame.bind("<Configure>", configure_scroll_region)
+        buttons_canvas.bind("<Configure>", configure_canvas_size)
+
+        def _on_mousewheel(event):
+            buttons_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        buttons_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         # Section 1: Grupy
         section1 = tk.LabelFrame(buttons_frame, text="PRZYPISZ DO GRUPY", 
@@ -174,6 +197,22 @@ class AppGUI:
                                   font=self.default_font, bg="#f39c12", fg="white",
                                   command=self.choose_times_file_path, padx=10, pady=8, relief="raised", bd=2)
         btn_times_path.pack(fill="x", padx=10, pady=5)
+
+        autostart_enabled = monitor.MonitorThread.load_autostart_state()
+        autostart_frame = tk.LabelFrame(buttons_frame, text="AUTOSTART", 
+                                       font=self.title_font, bg=self.COLOR_BG, fg=self.COLOR_TEXT)
+        autostart_frame.pack(fill="x", pady=10)
+
+        self.autostart_var = tk.IntVar(value=1 if autostart_enabled else 0)
+        self.autostart_scale = tk.Scale(autostart_frame, from_=0, to=1, orient="horizontal",
+                                       showvalue=False, variable=self.autostart_var,
+                                       command=self.on_autostart_toggle, length=220,
+                                       bg=self.COLOR_BG, highlightthickness=0)
+        self.autostart_scale.pack(side="left", padx=10, pady=10)
+
+        self.autostart_status_label = tk.Label(autostart_frame, text=("Autostart: ON" if autostart_enabled else "Autostart: OFF"),
+                                              font=self.default_font, bg=self.COLOR_BG, fg=self.COLOR_TEXT)
+        self.autostart_status_label.pack(side="left", padx=10)
 
         # Section 3: Apocalypse
         section3 = tk.LabelFrame(buttons_frame, text="TRYB APOCALYPSE", 
@@ -311,6 +350,15 @@ class AppGUI:
         else:
             messagebox.showerror("Błąd", "Nie udało się zapisać nowej ścieżki.")
 
+
+    def on_autostart_toggle(self, value):
+        enabled = bool(int(value))
+        if enabled:
+            self.monitor.enable_autostart(monitor.AUTOSTART_REGISTRY_NAME, self.monitor.get_exe_path())
+        else:
+            self.monitor.disable_autostart(monitor.AUTOSTART_REGISTRY_NAME)
+
+        self.autostart_status_label.config(text=("Autostart: ON" if enabled else "Autostart: OFF"))
 
     def add_to_group(self, group_letter):
         """Pobiera zaznaczenie i wywołuje backendową funkcję dodającą do grupy."""
