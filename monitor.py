@@ -3,12 +3,12 @@ import win32process
 import win32gui
 import psutil
 import time
-import json
 import os
 import sites
 import winreg
 import listApps002 as listapps  # backend
 import sys
+from path_utils import load_json_file, save_json_file
 
 TIMES_PATH_FILE = "times_path.json"   # plik przechowujący ścieżkę do times.json
 DEFAULT_TIMES_FILE = "times.json"     # domyślna lokalizacja
@@ -36,7 +36,8 @@ class MonitorThread(threading.Thread):
         self.current = None
         self.start_time = time.monotonic()
         self.on_limit_reached = on_limit_reached
-        # wczytaj zapisany czas grupy A (jeśli istnieje)
+        # wczytaj zapis ścieżki do times.json, a potem czas grupy A (jeśli istnieje)
+        self.load_times_path()
         self.group_a_total = float(self.load_times() or 0)
 
 
@@ -133,24 +134,14 @@ class MonitorThread(threading.Thread):
 
     def save_times(self):
         """Zapisuje czas grupy A do pliku JSON."""
-        try:
-            data = {"group_a_seconds": int(self.group_a_total)}
-            with open(times_file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=4, ensure_ascii=False)
-        except Exception:
-            pass
+        data = {"group_a_seconds": int(self.group_a_total)}
+        save_json_file(times_file_path, data)
 
 
     def load_times(self):
         """Wczytuje zapisany czas grupy A (jeśli istnieje). Zwraca liczbę sekund lub 0."""
-        if not os.path.exists(times_file_path):
-            return 0
-        try:
-            with open(times_file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return int(data.get("group_a_seconds", 0))
-        except Exception:
-            return 0
+        data = load_json_file(times_file_path, {})
+        return int(data.get("group_a_seconds", 0)) if isinstance(data, dict) else 0
         
     def load_times_path(self):
         """
@@ -159,20 +150,13 @@ class MonitorThread(threading.Thread):
         """
         global times_file_path
 
-        if not os.path.exists(TIMES_PATH_FILE):
-            times_file_path = DEFAULT_TIMES_FILE
-            return
-        try:
-            with open(TIMES_PATH_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                custom_path = data.get("times_file")
-
-                if isinstance(custom_path, str) and custom_path.strip():
-                    times_file_path = custom_path.strip()
-                else:
-                    times_file_path = DEFAULT_TIMES_FILE
-        except Exception:
-            times_file_path = DEFAULT_TIMES_FILE
+        data = load_json_file(TIMES_PATH_FILE, {})
+        if isinstance(data, dict):
+            custom_path = data.get("times_file")
+            if isinstance(custom_path, str) and custom_path.strip():
+                times_file_path = custom_path.strip()
+                return
+        times_file_path = DEFAULT_TIMES_FILE
 
     def save_times_path(self, new_path: str):
         """
@@ -184,15 +168,10 @@ class MonitorThread(threading.Thread):
         if not new_path:
             return False
 
-        try:
-            with open(TIMES_PATH_FILE, "w", encoding="utf-8") as f:
-                json.dump({"times_file": new_path}, f, indent=4, ensure_ascii=False)
-
+        if save_json_file(TIMES_PATH_FILE, {"times_file": new_path}):
             times_file_path = new_path
             return True
-
-        except Exception:
-            return False
+        return False
 
     def enable_autostart(self, app_name, exe_path):
         # Otwieramy klucz Run w rejestrze
@@ -242,5 +221,4 @@ class MonitorThread(threading.Thread):
         else:
             # Program działa jako skrypt .py
             return os.path.abspath(__file__)
-
 

@@ -1,34 +1,22 @@
 # sites.py
-import os
-import json
 from typing import Dict
 import tkinter as tk
-import tkinter.font as tkfont
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox
+from path_utils import load_json_file, save_json_file
+
 
 SITES_FILE = "sites.json"
 sites = {}
 # struktura: {"keyword": group} gdzie group: 0 = produktywne, 1 = nieproduktywne
 def load_sites() -> Dict[str, int]:
     global sites
+    sites = load_json_file(SITES_FILE, {}) or {}
 
-    if not os.path.exists(SITES_FILE):
-        sites = {}
-    try:
-        with open(SITES_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            # upewnij się, że klucze są lowercase i wartości int
-            sites = data
-    except Exception:
-        sites = {}
 
 def save_sites() -> None:
     global sites
-    try:
-        with open(SITES_FILE, "w", encoding="utf-8") as f:
-            json.dump(sites, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
+    save_json_file(SITES_FILE, sites, indent=2)
+
 
 def add_site(keyword: str, group: int) -> None:
     global sites
@@ -37,6 +25,7 @@ def add_site(keyword: str, group: int) -> None:
         return
     sites[keyword] = int(group)
     save_sites()
+
 
 def remove_site(keyword: str) -> None:
     global sites

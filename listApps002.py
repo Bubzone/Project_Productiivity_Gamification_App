@@ -3,10 +3,9 @@
 # -*- coding: utf-8 -*-
 
 import os
-import json
 from pathlib import Path
 import winreg
-from pathlib import Path
+from path_utils import load_json_file, save_json_file
 
 
 # opcjonalnie: do rozwiązywania .lnk (wymaga pywin32)
@@ -47,49 +46,27 @@ LAUNCHER_REGISTRY_PATHS = {
 def load_groups():
     """Wczytuje słownik grup z pliku JSON, jeśli istnieje."""
     global grupy
-    if not os.path.exists(GRUPY_FILE):
-        grupy = {}
-        return
-    try:
-        with open(GRUPY_FILE, "r", encoding="utf-8") as f:
-            grupy = json.load(f)
-    except Exception:
-        grupy = {}
+    grupy = load_json_file(GRUPY_FILE, {}) or {}
 
 
 def save_groups():
     """Zapisuje słownik grup do pliku JSON."""
-    try:
-        with open(GRUPY_FILE, "w", encoding="utf-8") as f:
-            json.dump(grupy, f, indent=4, ensure_ascii=False)
-    except Exception:
-        pass
+    save_json_file(GRUPY_FILE, grupy)
 
 
 def load_scan_paths():
     """Wczytuje listę dodatkowych ścieżek do skanowania."""
     global _scan_paths
-    if not os.path.exists(SCAN_PATHS_FILE):
-        _scan_paths = []
-        return
-    try:
-        with open(SCAN_PATHS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                _scan_paths = [str(p) for p in data if p and Path(p).exists()]
-            else:
-                _scan_paths = []
-    except Exception:
+    data = load_json_file(SCAN_PATHS_FILE, [])
+    if isinstance(data, list):
+        _scan_paths = [str(p) for p in data if p and Path(p).exists()]
+    else:
         _scan_paths = []
 
 
 def save_scan_paths():
     """Zapisuje listę dodatkowych ścieżek do pliku JSON."""
-    try:
-        with open(SCAN_PATHS_FILE, "w", encoding="utf-8") as f:
-            json.dump(_scan_paths, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
+    save_json_file(SCAN_PATHS_FILE, _scan_paths, indent=2)
 
 
 def add_scan_path(path_str: str):

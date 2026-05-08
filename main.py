@@ -17,6 +17,7 @@ from PIL import Image
 import optionsMinigame
 import sites
 import monitor
+from path_utils import load_json_file, save_json_file
 
 APOCALYPSE_FILE = "apocalypse_state.json"
 
@@ -648,24 +649,12 @@ class AppGUI:
 
     def _load_apocalypse_state(self):
         """Wczytuje stan Apocalypse z pliku. Zwraca bool."""
-        try:
-            path = APOCALYPSE_FILE
-            if not os.path.exists(path):
-                return False
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return bool(data.get("apocalypse_enabled", False))
-        except Exception:
-            return False
+        data = load_json_file(APOCALYPSE_FILE, {})
+        return bool(data.get("apocalypse_enabled", False)) if isinstance(data, dict) else False
 
     def _save_apocalypse_state(self):
         """Zapisuje aktualny stan self.apocalypse_enabled do pliku (atomowo)."""
-        try:
-            path = APOCALYPSE_FILE
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"apocalypse_enabled": bool(self.apocalypse_enabled)}, f, indent=2, ensure_ascii=False)
-        except Exception:
-            pass
+        save_json_file(APOCALYPSE_FILE, {"apocalypse_enabled": bool(self.apocalypse_enabled)}, indent=2)
             
     def open_add_site_dialog(self):
         if not self.apocalypse_enabled:
