@@ -63,7 +63,7 @@ class MonitorThread(threading.Thread):
             active_key = None
             site=False
             if name:
-                if name.lower() in BROWSER_EXES:
+                if sites.sites and name.lower() in BROWSER_EXES:
                     try:
                         # pobierz tytuł okna i spróbuj wyciągnąć nazwę strony
                         hwnd = win32gui.GetForegroundWindow()

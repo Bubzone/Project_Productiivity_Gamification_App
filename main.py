@@ -17,7 +17,7 @@ from PIL import Image
 import optionsMinigame
 import sites
 import monitor
-from path_utils import load_json_file, save_json_file
+from path_utils import load_json_file, save_json_file, resource_path
 
 APOCALYPSE_FILE = "apocalypse_state.json"
 
@@ -616,7 +616,13 @@ class AppGUI:
     # ukryj okno
         self.root.withdraw()
         # przygotuj ikonę (ikonę możesz załadować z pliku .ico lub PIL Image)
-        image = Image.open("app_icon.png")
+
+        try:
+            image = Image.open(resource_path("app_icon.png"))
+            print("Ikona OK")
+        except Exception as e:
+            print("Błąd ładowania ikony:", e)
+
         menu = pystray.Menu(
             pystray.MenuItem("Pokaż", lambda icon, item: self._tray_show(icon)),
             pystray.MenuItem("Wyjdź", lambda icon, item: self._tray_quit(icon))
@@ -635,6 +641,7 @@ class AppGUI:
         # zatrzymaj ikonę i wykonaj pełne zamknięcie
         icon.stop()
         self.cleanup()
+
 
     def try_toggle_apocalypse(self):
         if (self.apocalypse_enabled):
